@@ -1,0 +1,237 @@
+import { useEffect, useState } from 'react';
+import { Link, useParams } from 'react-router-dom';
+import { CalendarClock, Check, Copy, Download, ExternalLink, Link2, MapPin, MonitorUp, RefreshCw, Sparkles, Timer, UsersRound } from 'lucide-react';
+import Header from '../components/Header.jsx';
+import { getApiError, trainingAPI } from '../services/api.js';
+import { formatDateTime, getCountdownMessage, getSessionState, getSmartSummaryItems } from '../utils/session.js';
+
+function TrainingDetails() {
+  const { id } = useParams();
+  const [training, setTraining] = useState(null);
+  const [attendance, setAttendance] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [copied, setCopied] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const [now, setNow] = useState(() => new Date());
+
+  async function loadDetails(options = {}) {
+    try {
+      if (!options.silent) setLoading(true);
+      const [trainingResponse, attendanceResponse] = await Promise.all([
+        trainingAPI.getTraining(id),
+        trainingAPI.getAttendance(id)
+      ]);
+      setTraining(trainingResponse.data);
+      setAttendance(attendanceResponse.data);
+      setError('');
+    } catch (err) {
+      setError(getApiError(err, 'Failed to load training details.'));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    loadDetails();
+    const refreshId = window.setInterval(() => loadDetails({ silent: true }), 15000);
+    return () => window.clearInterval(refreshId);
+  }, [id]);
+
+  useEffect(() => {
+    const intervalId = window.setInterval(() => setNow(new Date()), 1000);
+    return () => window.clearInterval(intervalId);
+  }, []);
+
+  async function copyLink() {
+    await navigator.clipboard.writeText(training.attendanceLink);
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1800);
+  }
+
+  async function exportExcel() {
+    try {
+      setExporting(true);
+      const response = await trainingAPI.exportAttendance(id);
+      const url = window.URL.createObjectURL(new Blob([response.data]));
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', `attendance-${training.trainingName}.xlsx`);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (err) {
+      setError(getApiError(err, 'Failed to export attendance.'));
+    } finally {
+      setExporting(false);
+    }
+  }
+
+  const sessionState = training ? getSessionState(training, now) : null;
+  const countdownMessage = training ? getCountdownMessage(training, now) : '';
+  const summaryItems = training ? getSmartSummaryItems(training, attendance.length, now) : [];
+
+  return (
+    <div>
+      <Header />
+      <main className="container">
+        {error && <div className="alert error">{error}</div>}
+
+        {loading ? (
+          <section className="empty-state">
+            <div className="spinner" />
+            <p>Loading training details. The backend may be waking up if it has been idle.</p>
+          </section>
+        ) : training ? (
+          <>
+            <div className="page-title-row">
+              <div>
+                <p className="eyebrow">Training Details</p>
+                <h1>{training.trainingName}</h1>
+                <div className="title-meta">
+                  <span className={`status-badge ${sessionState.badgeClass}`}>{sessionState.label}</span>
+                  <span>{training.trainerName} at {training.location}</span>
+                </div>
+                {training.description && <p className="page-subtitle">{training.description}</p>}
+              </div>
+              <div className="actions-row">
+                <button className="button button-secondary compact" type="button" onClick={loadDetails}>
+                  <RefreshCw size={18} aria-hidden="true" />
+                  Refresh
+                </button>
+                <button className="button button-primary compact" type="button" onClick={exportExcel} disabled={exporting}>
+                  <Download size={18} aria-hidden="true" />
+                  {exporting ? 'Exporting...' : 'Excel'}
+                </button>
+                <Link className="button button-secondary compact" to={`/training/${training.id}/qr-display`} target="_blank">
+                  <MonitorUp size={18} aria-hidden="true" />
+                  Open QR Display
+                </Link>
+              </div>
+            </div>
+
+            <section className="kpi-grid details-kpis" aria-label="Training summary">
+              <article className="kpi-card">
+                <span className="kpi-icon info"><UsersRound size={20} aria-hidden="true" /></span>
+                <div>
+                  <p className="kpi-label">Present Attendees</p>
+                  <strong>{attendance.length}</strong>
+                </div>
+              </article>
+              <article className="kpi-card">
+                <span className={`kpi-icon status-${sessionState.badgeClass}`}><Timer size={20} aria-hidden="true" /></span>
+                <div>
+                  <p className="kpi-label">Session Status</p>
+                  <strong className="kpi-text">{sessionState.label}</strong>
+                </div>
+              </article>
+              <article className="kpi-card">
+                <span className="kpi-icon"><CalendarClock size={20} aria-hidden="true" /></span>
+                <div>
+                  <p className="kpi-label">Attendance Window</p>
+                  <strong className="kpi-text">{formatDateTime(training.startDateTime)}</strong>
+                  <span className="kpi-subtext">to {formatDateTime(training.endDateTime)}</span>
+                </div>
+              </article>
+              <article className="kpi-card">
+                <span className="kpi-icon warning"><MapPin size={20} aria-hidden="true" /></span>
+                <div>
+                  <p className="kpi-label">Location</p>
+                  <strong className="kpi-text">{training.location}</strong>
+                </div>
+              </article>
+            </section>
+
+            <section className="countdown-strip" aria-live="polite">
+              <Timer size={19} aria-hidden="true" />
+              <span>{countdownMessage}</span>
+            </section>
+
+            <section className="summary-panel" aria-label="Smart Attendance Summary">
+              <div className="panel-heading">
+                <span className="section-icon"><Sparkles size={18} aria-hidden="true" /></span>
+                <h2>Smart Attendance Summary</h2>
+              </div>
+              <ul>
+                {summaryItems.map((item) => (
+                  <li key={item}>{item}</li>
+                ))}
+              </ul>
+            </section>
+
+            <section className="details-grid">
+              <div className="panel">
+                <div className="panel-heading">
+                  <span className="section-icon"><Link2 size={18} aria-hidden="true" /></span>
+                  <h2>Attendance Link</h2>
+                </div>
+                <div className="copy-row">
+                  <input value={training.attendanceLink} readOnly aria-label="Attendance link" />
+                  <button className="icon-button" type="button" onClick={copyLink} title="Copy attendance link">
+                    {copied ? <Check size={18} aria-hidden="true" /> : <Copy size={18} aria-hidden="true" />}
+                    <span className="sr-only">Copy attendance link</span>
+                  </button>
+                  <Link className="icon-button" to={`/attend/${training.token}`} target="_blank" title="Open attendance form">
+                    <ExternalLink size={18} aria-hidden="true" />
+                    <span className="sr-only">Open attendance form</span>
+                  </Link>
+                </div>
+                <dl className="meta-list">
+                  <div><dt>Start</dt><dd>{formatDateTime(training.startDateTime)}</dd></div>
+                  <div><dt>End</dt><dd>{formatDateTime(training.endDateTime)}</dd></div>
+                </dl>
+              </div>
+
+              <div className="panel qr-panel">
+                <div className="panel-heading centered">
+                  <h2>QR Code</h2>
+                </div>
+                <img src={trainingAPI.getQrUrl(id)} alt={`QR code for ${training.trainingName}`} />
+              </div>
+            </section>
+
+            <section className="table-section" aria-label="Attendance submissions">
+              <div className="section-heading">
+                <div>
+                  <p className="eyebrow">Roster</p>
+                  <h2>Attendance Submissions</h2>
+                </div>
+              </div>
+              <div className="table-shell">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Employee ID</th>
+                      <th>Name</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {attendance.length === 0 ? (
+                      <tr>
+                        <td colSpan="2" className="center muted">No attendance submitted yet.</td>
+                      </tr>
+                    ) : (
+                      attendance.map((entry) => (
+                        <tr key={entry.employeeId}>
+                          <td><strong>{entry.employeeId}</strong></td>
+                          <td>{entry.employeeName}</td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          </>
+        ) : (
+          <section className="empty-state">
+            <h2>Training not found</h2>
+          </section>
+        )}
+      </main>
+    </div>
+  );
+}
+
+export default TrainingDetails;
