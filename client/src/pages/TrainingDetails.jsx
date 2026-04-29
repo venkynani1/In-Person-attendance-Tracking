@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { CalendarClock, Check, Copy, Download, ExternalLink, Link2, MapPin, MonitorUp, RefreshCw, Sparkles, Timer, UsersRound } from 'lucide-react';
+import { CalendarClock, Check, CircleStop, Copy, Download, ExternalLink, Link2, MapPin, MonitorUp, RefreshCw, Sparkles, Timer, UsersRound } from 'lucide-react';
 import Header from '../components/Header.jsx';
 import { getApiError, trainingAPI } from '../services/api.js';
 import { formatDateTime, getCountdownMessage, getSessionState, getSmartSummaryItems } from '../utils/session.js';
@@ -13,6 +13,9 @@ function TrainingDetails() {
   const [error, setError] = useState('');
   const [copied, setCopied] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const [stopping, setStopping] = useState(false);
+  const [showStopConfirm, setShowStopConfirm] = useState(false);
+  const [qrSrc, setQrSrc] = useState('');
   const [now, setNow] = useState(() => new Date());
 
   async function loadDetails(options = {}) {
@@ -36,6 +39,35 @@ function TrainingDetails() {
     loadDetails();
     const refreshId = window.setInterval(() => loadDetails({ silent: true }), 15000);
     return () => window.clearInterval(refreshId);
+  }, [id]);
+
+  useEffect(() => {
+    let active = true;
+    let objectUrl = '';
+
+    async function loadQrImage() {
+      try {
+        const response = await trainingAPI.getQrImage(id);
+        objectUrl = window.URL.createObjectURL(new Blob([response.data]));
+        if (active) {
+          setQrSrc((current) => {
+            if (current) window.URL.revokeObjectURL(current);
+            return objectUrl;
+          });
+        } else {
+          window.URL.revokeObjectURL(objectUrl);
+        }
+      } catch (err) {
+        if (active) setError(getApiError(err, 'Failed to load QR code.'));
+      }
+    }
+
+    loadQrImage();
+
+    return () => {
+      active = false;
+      if (objectUrl) window.URL.revokeObjectURL(objectUrl);
+    };
   }, [id]);
 
   useEffect(() => {
@@ -68,9 +100,24 @@ function TrainingDetails() {
     }
   }
 
+  async function stopAttendance() {
+    try {
+      setStopping(true);
+      const response = await trainingAPI.stopAttendance(id);
+      setTraining(response.data);
+      setShowStopConfirm(false);
+      await loadDetails({ silent: true });
+    } catch (err) {
+      setError(getApiError(err, 'Failed to stop attendance.'));
+    } finally {
+      setStopping(false);
+    }
+  }
+
   const sessionState = training ? getSessionState(training, now) : null;
   const countdownMessage = training ? getCountdownMessage(training, now) : '';
   const summaryItems = training ? getSmartSummaryItems(training, attendance.length, now) : [];
+  const canStopAttendance = sessionState?.key === 'active' && !training?.manuallyStopped;
 
   return (
     <div>
@@ -104,6 +151,12 @@ function TrainingDetails() {
                   <Download size={18} aria-hidden="true" />
                   {exporting ? 'Exporting...' : 'Excel'}
                 </button>
+                {canStopAttendance && (
+                  <button className="button button-danger compact" type="button" onClick={() => setShowStopConfirm(true)}>
+                    <CircleStop size={18} aria-hidden="true" />
+                    Stop Attendance
+                  </button>
+                )}
                 <Link className="button button-secondary compact" to={`/training/${training.id}/qr-display`} target="_blank">
                   <MonitorUp size={18} aria-hidden="true" />
                   Open QR Display
@@ -187,7 +240,13 @@ function TrainingDetails() {
                 <div className="panel-heading centered">
                   <h2>QR Code</h2>
                 </div>
-                <img src={trainingAPI.getQrUrl(id)} alt={`QR code for ${training.trainingName}`} />
+                {qrSrc ? (
+                  <img src={qrSrc} alt={`QR code for ${training.trainingName}`} />
+                ) : (
+                  <div className="qr-loading">
+                    <div className="spinner" />
+                  </div>
+                )}
               </div>
             </section>
 
@@ -228,6 +287,24 @@ function TrainingDetails() {
           <section className="empty-state">
             <h2>Training not found</h2>
           </section>
+        )}
+
+        {showStopConfirm && (
+          <div className="modal-backdrop" role="presentation">
+            <div className="modal" role="dialog" aria-modal="true" aria-labelledby="stop-attendance-title">
+              <h2 id="stop-attendance-title">Stop Attendance</h2>
+              <p>Stop attendance now? Participants will no longer be able to submit.</p>
+              <div className="modal-actions">
+                <button className="button button-secondary" type="button" onClick={() => setShowStopConfirm(false)}>
+                  Cancel
+                </button>
+                <button className="button button-danger" type="button" onClick={stopAttendance} disabled={stopping}>
+                  <CircleStop size={18} aria-hidden="true" />
+                  {stopping ? 'Stopping...' : 'Stop Attendance'}
+                </button>
+              </div>
+            </div>
+          </div>
         )}
       </main>
     </div>

@@ -116,7 +116,9 @@ function AttendPage() {
               <div className="alert warning">Attendance has not opened yet.</div>
             )}
             {sessionState.key === 'closed' && (
-              <div className="alert error">Attendance has closed for this training.</div>
+              <div className="alert error">
+                {training.manuallyStopped ? 'Attendance closed by admin' : 'Attendance has closed for this training.'}
+              </div>
             )}
             {error && <div className="alert error">{error}</div>}
             {success && <div className="alert success">{success}</div>}

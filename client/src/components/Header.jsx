@@ -1,7 +1,10 @@
 import { Link, NavLink } from 'react-router-dom';
-import { Building2, ClipboardCheck, Plus } from 'lucide-react';
+import { Building2, ClipboardCheck, LogOut, Plus, UserCircle } from 'lucide-react';
+import { useAuth } from '../context/AuthContext.jsx';
 
 function Header() {
+  const { user, logout } = useAuth();
+
   return (
     <header className="app-header">
       <div className="header-inner">
@@ -21,10 +24,20 @@ function Header() {
           <NavLink to="/" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
             Dashboard
           </NavLink>
+          {user && (
+            <span className="user-chip">
+              <UserCircle size={16} aria-hidden="true" />
+              {user.username}
+            </span>
+          )}
           <NavLink to="/create" className="button button-primary compact">
             <Plus size={18} aria-hidden="true" />
             New Training
           </NavLink>
+          <button className="icon-button" type="button" onClick={logout} title="Logout">
+            <LogOut size={18} aria-hidden="true" />
+            <span className="sr-only">Logout</span>
+          </button>
         </nav>
       </div>
     </header>

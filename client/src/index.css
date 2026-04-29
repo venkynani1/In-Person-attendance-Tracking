@@ -313,6 +313,15 @@ p {
   border-color: #aebdca;
 }
 
+.button-danger {
+  background: var(--danger);
+  color: #ffffff;
+}
+
+.button-danger:hover {
+  background: #8f1c13;
+}
+
 .icon-button {
   align-items: center;
   background: var(--surface);
@@ -330,6 +339,20 @@ p {
   background: var(--primary-soft);
   border-color: #a9d9d2;
   color: var(--primary-dark);
+}
+
+.icon-button.danger-action:hover,
+.danger-action:hover {
+  background: var(--danger-soft);
+  border-color: #ffc8c1;
+  color: var(--danger);
+}
+
+.icon-button.success-action:hover,
+.success-action:hover {
+  background: var(--success-soft);
+  border-color: #bde6ca;
+  color: var(--success);
 }
 
 .text-button {
@@ -364,6 +387,24 @@ p {
   background: var(--success-soft);
   border: 1px solid #bde6ca;
   color: #17643c;
+}
+
+.user-chip {
+  align-items: center;
+  background: var(--surface-soft);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: #344554;
+  display: inline-flex;
+  font-size: 0.84rem;
+  font-weight: 850;
+  gap: 0.35rem;
+  min-height: 38px;
+  padding: 0.45rem 0.7rem;
+}
+
+.account-line {
+  margin-bottom: -0.25rem;
 }
 
 .empty-state {
@@ -590,6 +631,24 @@ tbody tr:last-child td {
 }
 
 .status-badge.closed {
+  background: var(--danger-soft);
+  border-color: #ffc8c1;
+  color: var(--danger);
+}
+
+.status-badge.user-approved {
+  background: var(--success-soft);
+  border-color: #bde6ca;
+  color: var(--success);
+}
+
+.status-badge.user-pending {
+  background: var(--warning-soft);
+  border-color: #f2d290;
+  color: var(--warning);
+}
+
+.status-badge.user-rejected {
   background: var(--danger-soft);
   border-color: #ffc8c1;
   color: var(--danger);
@@ -880,6 +939,130 @@ textarea:focus {
   padding: 0;
 }
 
+.auth-page {
+  align-items: center;
+  background:
+    linear-gradient(135deg, rgba(15, 118, 110, 0.08) 0%, rgba(37, 99, 235, 0.08) 55%, rgba(184, 110, 0, 0.08) 100%),
+    #f7f9fb;
+  display: flex;
+  justify-content: center;
+  min-height: 100vh;
+  padding: 1rem;
+}
+
+.auth-panel {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: var(--shadow-md);
+  max-width: 460px;
+  padding: 1.35rem;
+  width: 100%;
+}
+
+.auth-heading {
+  align-items: center;
+  border-bottom: 1px solid var(--line);
+  display: flex;
+  gap: 0.85rem;
+  margin-bottom: 1.1rem;
+  padding-bottom: 1rem;
+}
+
+.auth-heading h1 {
+  font-size: 1.85rem;
+}
+
+.auth-footnote {
+  color: var(--muted);
+  font-size: 0.92rem;
+  margin-top: 1rem;
+  text-align: center;
+}
+
+.auth-footnote a {
+  color: var(--primary-dark);
+  font-weight: 850;
+}
+
+.admin-users-section {
+  margin-bottom: 1.25rem;
+}
+
+.admin-users-grid {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+}
+
+.approval-list {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.approval-row {
+  align-items: center;
+  background: var(--surface-soft);
+  border: 1px solid #e9eef4;
+  border-radius: 7px;
+  display: flex;
+  gap: 0.75rem;
+  justify-content: space-between;
+  padding: 0.78rem;
+}
+
+.compact-table-shell {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow-x: auto;
+}
+
+.compact-table-shell table {
+  min-width: 420px;
+}
+
+.modal-backdrop {
+  align-items: center;
+  background: rgba(15, 23, 42, 0.42);
+  display: flex;
+  inset: 0;
+  justify-content: center;
+  padding: 1rem;
+  position: fixed;
+  z-index: 80;
+}
+
+.modal {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: var(--shadow-md);
+  max-width: 460px;
+  padding: 1.25rem;
+  width: 100%;
+}
+
+.modal p {
+  color: #344554;
+  line-height: 1.5;
+  margin-top: 0.65rem;
+}
+
+.modal-actions {
+  display: flex;
+  gap: 0.75rem;
+  justify-content: flex-end;
+  margin-top: 1.25rem;
+}
+
+.qr-loading {
+  align-items: center;
+  aspect-ratio: 1;
+  display: flex;
+  justify-content: center;
+  min-height: 220px;
+}
+
 .qr-display-page {
   align-items: center;
   background:
@@ -1001,7 +1184,8 @@ textarea:focus {
 
 @media (max-width: 980px) {
   .kpi-grid,
-  .details-kpis {
+  .details-kpis,
+  .admin-users-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
@@ -1030,7 +1214,8 @@ textarea:focus {
 
   .header-inner,
   .page-title-row,
-  .form-actions {
+  .form-actions,
+  .modal-actions {
     align-items: stretch;
     flex-direction: column;
   }
@@ -1056,6 +1241,7 @@ textarea:focus {
 
   .kpi-grid,
   .details-kpis,
+  .admin-users-grid,
   .form-grid.two,
   .meta-list {
     grid-template-columns: 1fr;

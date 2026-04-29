@@ -10,6 +10,7 @@ function QrDisplay() {
   const [attendance, setAttendance] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [qrSrc, setQrSrc] = useState('');
   const [now, setNow] = useState(() => new Date());
 
   async function loadDisplay(options = {}) {
@@ -33,6 +34,35 @@ function QrDisplay() {
     loadDisplay();
     const refreshId = window.setInterval(() => loadDisplay({ silent: true }), 15000);
     return () => window.clearInterval(refreshId);
+  }, [id]);
+
+  useEffect(() => {
+    let active = true;
+    let objectUrl = '';
+
+    async function loadQrImage() {
+      try {
+        const response = await trainingAPI.getQrImage(id);
+        objectUrl = window.URL.createObjectURL(new Blob([response.data]));
+        if (active) {
+          setQrSrc((current) => {
+            if (current) window.URL.revokeObjectURL(current);
+            return objectUrl;
+          });
+        } else {
+          window.URL.revokeObjectURL(objectUrl);
+        }
+      } catch (err) {
+        if (active) setError(getApiError(err, 'Failed to load QR code.'));
+      }
+    }
+
+    loadQrImage();
+
+    return () => {
+      active = false;
+      if (objectUrl) window.URL.revokeObjectURL(objectUrl);
+    };
   }, [id]);
 
   useEffect(() => {
@@ -76,7 +106,13 @@ function QrDisplay() {
 
           <div className="qr-display-code-wrap">
             <div className="qr-display-code">
-              <img src={trainingAPI.getQrUrl(id)} alt={`QR code for ${training.trainingName}`} />
+              {qrSrc ? (
+                <img src={qrSrc} alt={`QR code for ${training.trainingName}`} />
+              ) : (
+                <div className="qr-loading">
+                  <div className="spinner" />
+                </div>
+              )}
             </div>
             <div className="qr-display-footnote">
               <QrCode size={18} aria-hidden="true" />

@@ -6,6 +6,16 @@ export function formatDateTime(value) {
 }
 
 export function getSessionState(training, now = new Date()) {
+  if (training?.manuallyStopped) {
+    return {
+      key: 'closed',
+      label: 'Closed',
+      badgeClass: 'closed',
+      targetTime: null,
+      reason: 'manual'
+    };
+  }
+
   if (!training?.startDateTime || !training?.endDateTime) {
     return {
       key: 'closed',
@@ -60,6 +70,10 @@ export function getCountdownMessage(training, now = new Date()) {
   const state = getSessionState(training, now);
 
   if (state.key === 'closed') {
+    if (training?.manuallyStopped) {
+      return 'Attendance closed by admin';
+    }
+
     return 'Attendance closed';
   }
 

@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { CalendarClock, Download, Eye, MapPin, Plus, RefreshCw, UserCheck, UsersRound } from 'lucide-react';
+import { CalendarClock, Download, Eye, MapPin, Plus, RefreshCw, Trash2, UserCheck, UsersRound } from 'lucide-react';
 import Header from '../components/Header.jsx';
+import { useAuth } from '../context/AuthContext.jsx';
 import { getApiError, trainingAPI } from '../services/api.js';
 import { formatDateTime, getSessionState } from '../utils/session.js';
+import MasterAdminUsers from './MasterAdminUsers.jsx';
 
 function StatusBadge({ training, now }) {
   const sessionState = getSessionState(training, now);
@@ -11,10 +13,13 @@ function StatusBadge({ training, now }) {
 }
 
 function AdminDashboard() {
+  const { token, user } = useAuth();
   const [trainings, setTrainings] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [exportingId, setExportingId] = useState('');
+  const [deletingId, setDeletingId] = useState('');
+  const [deleteTarget, setDeleteTarget] = useState(null);
   const [now, setNow] = useState(() => new Date());
 
   async function loadTrainings() {
@@ -31,8 +36,9 @@ function AdminDashboard() {
   }
 
   useEffect(() => {
+    if (!token) return;
     loadTrainings();
-  }, []);
+  }, [token]);
 
   useEffect(() => {
     const intervalId = window.setInterval(() => setNow(new Date()), 1000);
@@ -58,6 +64,21 @@ function AdminDashboard() {
     }
   }
 
+  async function confirmDelete() {
+    if (!deleteTarget) return;
+
+    try {
+      setDeletingId(deleteTarget.id);
+      await trainingAPI.deleteTraining(deleteTarget.id);
+      setDeleteTarget(null);
+      await loadTrainings();
+    } catch (err) {
+      setError(getApiError(err, 'Failed to delete training.'));
+    } finally {
+      setDeletingId('');
+    }
+  }
+
   const openCount = trainings.filter((training) => getSessionState(training, now).key === 'active').length;
   const totalAttendance = trainings.reduce((sum, training) => sum + (training._count?.attendances || 0), 0);
   const upcomingCount = trainings.filter((training) => getSessionState(training, now).key === 'not-started').length;
@@ -70,6 +91,7 @@ function AdminDashboard() {
           <div>
             <p className="eyebrow">Admin</p>
             <h1>Training Attendance</h1>
+            {user && <p className="page-subtitle account-line">Logged in as <strong>{user.username}</strong></p>}
             <p className="page-subtitle">Monitor active training sessions, attendance capture, and exports from one operational view.</p>
           </div>
           <div className="actions-row">
@@ -85,6 +107,8 @@ function AdminDashboard() {
         </div>
 
         {error && <div className="alert error">{error}</div>}
+
+        {user?.role === 'MASTER_ADMIN' && <MasterAdminUsers />}
 
         {loading ? (
           <section className="empty-state">
@@ -185,6 +209,16 @@ function AdminDashboard() {
                               <Download size={18} aria-hidden="true" />
                               <span className="sr-only">Download Excel</span>
                             </button>
+                            <button
+                              className="icon-button danger-action"
+                              type="button"
+                              title="Delete training"
+                              onClick={() => setDeleteTarget(training)}
+                              disabled={deletingId === training.id}
+                            >
+                              <Trash2 size={18} aria-hidden="true" />
+                              <span className="sr-only">Delete</span>
+                            </button>
                           </div>
                         </td>
                       </tr>
@@ -194,6 +228,24 @@ function AdminDashboard() {
               </div>
             </section>
           </>
+        )}
+
+        {deleteTarget && (
+          <div className="modal-backdrop" role="presentation">
+            <div className="modal" role="dialog" aria-modal="true" aria-labelledby="delete-training-title">
+              <h2 id="delete-training-title">Delete Training</h2>
+              <p>Are you sure you want to delete this training and all captured attendance?</p>
+              <div className="modal-actions">
+                <button className="button button-secondary" type="button" onClick={() => setDeleteTarget(null)}>
+                  Cancel
+                </button>
+                <button className="button button-danger" type="button" onClick={confirmDelete} disabled={deletingId === deleteTarget.id}>
+                  <Trash2 size={18} aria-hidden="true" />
+                  {deletingId === deleteTarget.id ? 'Deleting...' : 'Delete'}
+                </button>
+              </div>
+            </div>
+          </div>
         )}
       </main>
     </div>

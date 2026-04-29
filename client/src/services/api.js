@@ -10,6 +10,57 @@ const api = axios.create({
   timeout: 18000
 });
 
+export function getStoredToken() {
+  return localStorage.getItem('attendanceAuthToken');
+}
+
+export function setStoredToken(token) {
+  localStorage.setItem('attendanceAuthToken', token);
+}
+
+export function clearStoredToken() {
+  localStorage.removeItem('attendanceAuthToken');
+}
+
+function isPublicRoute() {
+  return (
+    window.location.pathname === '/login' ||
+    window.location.pathname === '/signup' ||
+    window.location.pathname.startsWith('/attend/')
+  );
+}
+
+function redirectToLogin() {
+  if (isPublicRoute()) return;
+
+  const currentPath = `${window.location.pathname}${window.location.search}`;
+  const loginUrl = `/login?redirect=${encodeURIComponent(currentPath)}`;
+  window.location.replace(loginUrl);
+}
+
+api.interceptors.request.use((config) => {
+  const token = getStoredToken();
+  if (token) {
+    config.headers = config.headers || {};
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+
+  return config;
+});
+
+api.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (error.response?.status === 401) {
+      clearStoredToken();
+      window.dispatchEvent(new CustomEvent('attendance-auth-expired'));
+      redirectToLogin();
+    }
+
+    return Promise.reject(error);
+  }
+);
+
 const backendListeners = new Set();
 
 export function subscribeBackendStatus(listener) {
@@ -98,14 +149,28 @@ export const trainingAPI = {
       api.get(`/api/trainings/${id}/attendance`)
     );
   },
-  getQrUrl(id) {
-    return `${API_BASE_URL}/api/trainings/${id}/qr`;
+  getQrImage(id) {
+    return requestWithRetry(() =>
+      api.get(`/api/trainings/${id}/qr`, {
+        responseType: 'blob'
+      })
+    );
   },
   exportAttendance(id) {
     return requestWithRetry(() =>
       api.get(`/api/trainings/${id}/export`, {
         responseType: 'blob'
       })
+    );
+  },
+  stopAttendance(id) {
+    return requestWithRetry(() =>
+      api.patch(`/api/trainings/${id}/stop`)
+    );
+  },
+  deleteTraining(id) {
+    return requestWithRetry(() =>
+      api.delete(`/api/trainings/${id}`)
     );
   }
 };
@@ -120,6 +185,50 @@ export const attendAPI = {
     await checkHealth();
     return requestWithRetry(() =>
       api.post(`/api/attend/${token}`, payload)
+    );
+  }
+};
+
+export const authAPI = {
+  login(payload) {
+    return requestWithRetry(() =>
+      api.post('/api/auth/login', payload),
+      { retries: 0 }
+    );
+  },
+  signup(payload) {
+    return requestWithRetry(() =>
+      api.post('/api/auth/signup', payload),
+      { retries: 0 }
+    );
+  },
+  me() {
+    return requestWithRetry(() =>
+      api.get('/api/auth/me'),
+      { retries: 0 }
+    );
+  }
+};
+
+export const adminAPI = {
+  getUsers() {
+    return requestWithRetry(() =>
+      api.get('/api/admin/users')
+    );
+  },
+  getPendingUsers() {
+    return requestWithRetry(() =>
+      api.get('/api/admin/pending-users')
+    );
+  },
+  approveUser(id) {
+    return requestWithRetry(() =>
+      api.patch(`/api/admin/users/${id}/approve`)
+    );
+  },
+  rejectUser(id) {
+    return requestWithRetry(() =>
+      api.patch(`/api/admin/users/${id}/reject`)
     );
   }
 };
