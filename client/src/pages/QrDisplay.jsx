@@ -102,6 +102,9 @@ function QrDisplay() {
             <div className="qr-display-window">
               {formatDateTime(training.startDateTime)} to {formatDateTime(training.endDateTime)}
             </div>
+            <div className="qr-display-instruction">
+              Enter Employee ID and Name to confirm attendance.
+            </div>
           </div>
 
           <div className="qr-display-code-wrap">
@@ -116,7 +119,7 @@ function QrDisplay() {
             </div>
             <div className="qr-display-footnote">
               <QrCode size={18} aria-hidden="true" />
-              Use your employee ID and name only
+              Scan with your phone camera
             </div>
           </div>
         </section>

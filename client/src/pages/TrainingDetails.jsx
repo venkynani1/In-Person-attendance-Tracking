@@ -1,12 +1,13 @@
 import { useEffect, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
-import { CalendarClock, Check, CircleStop, Copy, Download, ExternalLink, Link2, MapPin, MonitorUp, RefreshCw, Sparkles, Timer, UsersRound } from 'lucide-react';
+import { Link, useNavigate, useParams } from 'react-router-dom';
+import { CalendarClock, Check, CircleStop, Copy, Download, ExternalLink, Link2, MapPin, MonitorUp, RefreshCw, Sparkles, Timer, Trash2, Upload, UserX, UsersRound } from 'lucide-react';
 import Header from '../components/Header.jsx';
 import { getApiError, trainingAPI } from '../services/api.js';
 import { formatDateTime, getCountdownMessage, getSessionState, getSmartSummaryItems } from '../utils/session.js';
 
 function TrainingDetails() {
   const { id } = useParams();
+  const navigate = useNavigate();
   const [training, setTraining] = useState(null);
   const [attendance, setAttendance] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -14,7 +15,9 @@ function TrainingDetails() {
   const [copied, setCopied] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [stopping, setStopping] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [showStopConfirm, setShowStopConfirm] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [qrSrc, setQrSrc] = useState('');
   const [now, setNow] = useState(() => new Date());
 
@@ -114,10 +117,28 @@ function TrainingDetails() {
     }
   }
 
+  async function deleteTraining() {
+    try {
+      setDeleting(true);
+      await trainingAPI.deleteTraining(id);
+      navigate('/');
+    } catch (err) {
+      setError(getApiError(err, 'Failed to delete training.'));
+    } finally {
+      setDeleting(false);
+    }
+  }
+
   const sessionState = training ? getSessionState(training, now) : null;
   const countdownMessage = training ? getCountdownMessage(training, now) : '';
   const summaryItems = training ? getSmartSummaryItems(training, attendance.length, now) : [];
   const canStopAttendance = sessionState?.key === 'active' && !training?.manuallyStopped;
+  const sortedAttendance = [...attendance].sort((first, second) => {
+    const nameComparison = first.employeeName.localeCompare(second.employeeName);
+    return nameComparison || first.employeeId.localeCompare(second.employeeId);
+  });
+  const nominatedCount = training?.nominatedCount || 0;
+  const absentCount = nominatedCount > 0 ? Math.max(0, nominatedCount - attendance.length) : 0;
 
   return (
     <div>
@@ -132,14 +153,19 @@ function TrainingDetails() {
           </section>
         ) : training ? (
           <>
-            <div className="page-title-row">
+            <section className="training-hero-card">
               <div>
                 <p className="eyebrow">Training Details</p>
                 <h1>{training.trainingName}</h1>
                 <div className="title-meta">
                   <span className={`status-badge ${sessionState.badgeClass}`}>{sessionState.label}</span>
-                  <span>{training.trainerName} at {training.location}</span>
+                  <span>{formatDateTime(training.startDateTime)} to {formatDateTime(training.endDateTime)}</span>
                 </div>
+                <dl className="hero-meta-grid">
+                  <div><dt>Trainer</dt><dd>{training.trainerName}</dd></div>
+                  <div><dt>Location</dt><dd>{training.location}</dd></div>
+                  <div><dt>Countdown</dt><dd>{countdownMessage}</dd></div>
+                </dl>
                 {training.description && <p className="page-subtitle">{training.description}</p>}
               </div>
               <div className="actions-row">
@@ -149,7 +175,11 @@ function TrainingDetails() {
                 </button>
                 <button className="button button-primary compact" type="button" onClick={exportExcel} disabled={exporting}>
                   <Download size={18} aria-hidden="true" />
-                  {exporting ? 'Exporting...' : 'Excel'}
+                  {exporting ? 'Exporting...' : 'Download Report'}
+                </button>
+                <button className="button button-secondary compact" type="button" disabled>
+                  <Upload size={18} aria-hidden="true" />
+                  Upload Nominations
                 </button>
                 {canStopAttendance && (
                   <button className="button button-danger compact" type="button" onClick={() => setShowStopConfirm(true)}>
@@ -161,37 +191,40 @@ function TrainingDetails() {
                   <MonitorUp size={18} aria-hidden="true" />
                   Open QR Display
                 </Link>
+                <button className="button button-danger compact" type="button" onClick={() => setShowDeleteConfirm(true)}>
+                  <Trash2 size={18} aria-hidden="true" />
+                  Delete Training
+                </button>
               </div>
-            </div>
+            </section>
 
             <section className="kpi-grid details-kpis" aria-label="Training summary">
               <article className="kpi-card">
                 <span className="kpi-icon info"><UsersRound size={20} aria-hidden="true" /></span>
                 <div>
-                  <p className="kpi-label">Present Attendees</p>
+                  <p className="kpi-label">Nominated Count</p>
+                  <strong>{nominatedCount}</strong>
+                </div>
+              </article>
+              <article className="kpi-card">
+                <span className="kpi-icon success"><UsersRound size={20} aria-hidden="true" /></span>
+                <div>
+                  <p className="kpi-label">Present Count</p>
                   <strong>{attendance.length}</strong>
                 </div>
               </article>
               <article className="kpi-card">
-                <span className={`kpi-icon status-${sessionState.badgeClass}`}><Timer size={20} aria-hidden="true" /></span>
+                <span className="kpi-icon warning"><UserX size={20} aria-hidden="true" /></span>
                 <div>
-                  <p className="kpi-label">Session Status</p>
-                  <strong className="kpi-text">{sessionState.label}</strong>
+                  <p className="kpi-label">Absent Count</p>
+                  <strong>{absentCount}</strong>
                 </div>
               </article>
               <article className="kpi-card">
                 <span className="kpi-icon"><CalendarClock size={20} aria-hidden="true" /></span>
                 <div>
-                  <p className="kpi-label">Attendance Window</p>
-                  <strong className="kpi-text">{formatDateTime(training.startDateTime)}</strong>
-                  <span className="kpi-subtext">to {formatDateTime(training.endDateTime)}</span>
-                </div>
-              </article>
-              <article className="kpi-card">
-                <span className="kpi-icon warning"><MapPin size={20} aria-hidden="true" /></span>
-                <div>
-                  <p className="kpi-label">Location</p>
-                  <strong className="kpi-text">{training.location}</strong>
+                  <p className="kpi-label">Attendance Captured</p>
+                  <strong>{attendance.length}</strong>
                 </div>
               </article>
             </section>
@@ -271,7 +304,7 @@ function TrainingDetails() {
                         <td colSpan="2" className="center muted">No attendance submitted yet.</td>
                       </tr>
                     ) : (
-                      attendance.map((entry) => (
+                      sortedAttendance.map((entry) => (
                         <tr key={entry.employeeId}>
                           <td><strong>{entry.employeeId}</strong></td>
                           <td>{entry.employeeName}</td>
@@ -301,6 +334,24 @@ function TrainingDetails() {
                 <button className="button button-danger" type="button" onClick={stopAttendance} disabled={stopping}>
                   <CircleStop size={18} aria-hidden="true" />
                   {stopping ? 'Stopping...' : 'Stop Attendance'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {showDeleteConfirm && (
+          <div className="modal-backdrop" role="presentation">
+            <div className="modal" role="dialog" aria-modal="true" aria-labelledby="delete-training-title">
+              <h2 id="delete-training-title">Delete Training</h2>
+              <p>Are you sure you want to delete this training and all captured attendance?</p>
+              <div className="modal-actions">
+                <button className="button button-secondary" type="button" onClick={() => setShowDeleteConfirm(false)}>
+                  Cancel
+                </button>
+                <button className="button button-danger" type="button" onClick={deleteTraining} disabled={deleting}>
+                  <Trash2 size={18} aria-hidden="true" />
+                  {deleting ? 'Deleting...' : 'Delete'}
                 </button>
               </div>
             </div>

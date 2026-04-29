@@ -38,8 +38,8 @@ function SignupPage() {
 
     try {
       setSubmitting(true);
-      const response = await signup(form);
-      setMessage(response.message);
+      await signup(form);
+      setMessage('Request submitted. Please wait for master admin approval.');
       setForm(initialForm);
     } catch (err) {
       setError(getApiError(err, 'Could not submit signup request.'));
@@ -57,7 +57,8 @@ function SignupPage() {
           </span>
           <div>
             <p className="eyebrow">Admin Access</p>
-            <h1>Signup</h1>
+            <h1>Request access</h1>
+            <p className="auth-tagline">Signup requests require master admin approval.</p>
           </div>
         </div>
 

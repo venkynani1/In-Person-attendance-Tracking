@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { CalendarClock, Download, Eye, MapPin, Plus, RefreshCw, Trash2, UserCheck, UsersRound } from 'lucide-react';
+import { CalendarClock, CircleStop, Download, Eye, Filter, MapPin, MonitorUp, Plus, RefreshCw, Search, Trash2, UserCheck, UsersRound } from 'lucide-react';
 import Header from '../components/Header.jsx';
 import { useAuth } from '../context/AuthContext.jsx';
 import { getApiError, trainingAPI } from '../services/api.js';
@@ -12,6 +12,12 @@ function StatusBadge({ training, now }) {
   return <span className={`status-badge ${sessionState.badgeClass}`}>{sessionState.label}</span>;
 }
 
+function getDashboardStatus(training, now) {
+  const state = getSessionState(training, now);
+  if (training.manuallyStopped) return 'stopped';
+  return state.key;
+}
+
 function AdminDashboard() {
   const { token, user } = useAuth();
   const [trainings, setTrainings] = useState([]);
@@ -20,6 +26,10 @@ function AdminDashboard() {
   const [exportingId, setExportingId] = useState('');
   const [deletingId, setDeletingId] = useState('');
   const [deleteTarget, setDeleteTarget] = useState(null);
+  const [stoppingId, setStoppingId] = useState('');
+  const [stopTarget, setStopTarget] = useState(null);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [statusFilter, setStatusFilter] = useState('all');
   const [now, setNow] = useState(() => new Date());
 
   async function loadTrainings() {
@@ -79,18 +89,38 @@ function AdminDashboard() {
     }
   }
 
+  async function confirmStop() {
+    if (!stopTarget) return;
+
+    try {
+      setStoppingId(stopTarget.id);
+      await trainingAPI.stopAttendance(stopTarget.id);
+      setStopTarget(null);
+      await loadTrainings();
+    } catch (err) {
+      setError(getApiError(err, 'Failed to stop attendance.'));
+    } finally {
+      setStoppingId('');
+    }
+  }
+
   const openCount = trainings.filter((training) => getSessionState(training, now).key === 'active').length;
   const totalAttendance = trainings.reduce((sum, training) => sum + (training._count?.attendances || 0), 0);
-  const upcomingCount = trainings.filter((training) => getSessionState(training, now).key === 'not-started').length;
+  const closedCount = trainings.filter((training) => getSessionState(training, now).key === 'closed').length;
+  const filteredTrainings = trainings.filter((training) => {
+    const matchesSearch = training.trainingName.toLowerCase().includes(searchQuery.trim().toLowerCase());
+    const matchesStatus = statusFilter === 'all' || getDashboardStatus(training, now) === statusFilter;
+    return matchesSearch && matchesStatus;
+  });
 
   return (
     <div>
       <Header />
       <main className="container">
-        <div className="page-title-row">
+        <div className="page-title-row dashboard-hero">
           <div>
             <p className="eyebrow">Admin</p>
-            <h1>Training Attendance</h1>
+            <h1>Command Dashboard</h1>
             {user && <p className="page-subtitle account-line">Logged in as <strong>{user.username}</strong></p>}
             <p className="page-subtitle">Monitor active training sessions, attendance capture, and exports from one operational view.</p>
           </div>
@@ -111,15 +141,16 @@ function AdminDashboard() {
         {user?.role === 'MASTER_ADMIN' && <MasterAdminUsers />}
 
         {loading ? (
-          <section className="empty-state">
-            <div className="spinner" />
-            <p>Loading trainings. If this is the first request in a while, the Render backend may be waking up.</p>
+          <section className="skeleton-grid" aria-label="Loading trainings">
+            <div className="skeleton-card" />
+            <div className="skeleton-card" />
+            <div className="skeleton-card" />
+            <div className="skeleton-card" />
           </section>
         ) : trainings.length === 0 ? (
           <section className="empty-state">
             <CalendarClock size={36} aria-hidden="true" />
-            <h2>No trainings yet</h2>
-            <p>Create a training to generate its attendance link and QR code.</p>
+            <h2>No trainings created yet. Create your first training.</h2>
             <Link to="/create" className="button button-primary">
               <Plus size={18} aria-hidden="true" />
               Create Training
@@ -152,8 +183,8 @@ function AdminDashboard() {
               <article className="kpi-card">
                 <span className="kpi-icon warning"><MapPin size={20} aria-hidden="true" /></span>
                 <div>
-                  <p className="kpi-label">Upcoming</p>
-                  <strong>{upcomingCount}</strong>
+                  <p className="kpi-label">Closed trainings</p>
+                  <strong>{closedCount}</strong>
                 </div>
               </article>
             </section>
@@ -164,6 +195,28 @@ function AdminDashboard() {
                   <p className="eyebrow">Registry</p>
                   <h2>Training Sessions</h2>
                 </div>
+              </div>
+              <div className="dashboard-controls">
+                <label className="search-control">
+                  <Search size={18} aria-hidden="true" />
+                  <span className="sr-only">Search by training name</span>
+                  <input
+                    value={searchQuery}
+                    onChange={(event) => setSearchQuery(event.target.value)}
+                    placeholder="Search training name"
+                  />
+                </label>
+                <label className="filter-control">
+                  <Filter size={18} aria-hidden="true" />
+                  <span className="sr-only">Filter by status</span>
+                  <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
+                    <option value="all">All statuses</option>
+                    <option value="not-started">Not Started</option>
+                    <option value="active">Active</option>
+                    <option value="closed">Closed</option>
+                    <option value="stopped">Stopped</option>
+                  </select>
+                </label>
               </div>
               <div className="table-shell">
                 <table>
@@ -179,7 +232,15 @@ function AdminDashboard() {
                     </tr>
                   </thead>
                   <tbody>
-                    {trainings.map((training) => (
+                    {filteredTrainings.length === 0 ? (
+                      <tr>
+                        <td colSpan="7" className="center muted">No trainings match the current search or filter.</td>
+                      </tr>
+                    ) : filteredTrainings.map((training) => {
+                      const state = getSessionState(training, now);
+                      const canStop = state.key === 'active' && !training.manuallyStopped;
+
+                      return (
                       <tr key={training.id}>
                         <td>
                           <strong>{training.trainingName}</strong>
@@ -199,6 +260,10 @@ function AdminDashboard() {
                               <Eye size={18} aria-hidden="true" />
                               <span className="sr-only">View</span>
                             </Link>
+                            <Link to={`/training/${training.id}/qr-display`} className="icon-button" title="Open QR display">
+                              <MonitorUp size={18} aria-hidden="true" />
+                              <span className="sr-only">QR Display</span>
+                            </Link>
                             <button
                               className="icon-button"
                               type="button"
@@ -208,6 +273,16 @@ function AdminDashboard() {
                             >
                               <Download size={18} aria-hidden="true" />
                               <span className="sr-only">Download Excel</span>
+                            </button>
+                            <button
+                              className="icon-button danger-action"
+                              type="button"
+                              title="Stop attendance"
+                              onClick={() => setStopTarget(training)}
+                              disabled={!canStop || stoppingId === training.id}
+                            >
+                              <CircleStop size={18} aria-hidden="true" />
+                              <span className="sr-only">Stop</span>
                             </button>
                             <button
                               className="icon-button danger-action"
@@ -222,7 +297,8 @@ function AdminDashboard() {
                           </div>
                         </td>
                       </tr>
-                    ))}
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -242,6 +318,24 @@ function AdminDashboard() {
                 <button className="button button-danger" type="button" onClick={confirmDelete} disabled={deletingId === deleteTarget.id}>
                   <Trash2 size={18} aria-hidden="true" />
                   {deletingId === deleteTarget.id ? 'Deleting...' : 'Delete'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {stopTarget && (
+          <div className="modal-backdrop" role="presentation">
+            <div className="modal" role="dialog" aria-modal="true" aria-labelledby="stop-training-title">
+              <h2 id="stop-training-title">Stop Attendance</h2>
+              <p>Stop attendance now? Participants will no longer be able to submit.</p>
+              <div className="modal-actions">
+                <button className="button button-secondary" type="button" onClick={() => setStopTarget(null)}>
+                  Cancel
+                </button>
+                <button className="button button-danger" type="button" onClick={confirmStop} disabled={stoppingId === stopTarget.id}>
+                  <CircleStop size={18} aria-hidden="true" />
+                  {stoppingId === stopTarget.id ? 'Stopping...' : 'Stop Attendance'}
                 </button>
               </div>
             </div>

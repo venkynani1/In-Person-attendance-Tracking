@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
-import { BadgeCheck, Clock, IdCard, Send, Timer, UserRound } from 'lucide-react';
+import { BadgeCheck, CheckCircle2, Clock, IdCard, Send, Timer, UserRound } from 'lucide-react';
 import { attendAPI, getApiError } from '../services/api.js';
 import { formatDateTime, getCountdownMessage, getSessionState } from '../utils/session.js';
 
@@ -15,6 +15,8 @@ function AttendPage() {
   const [form, setForm] = useState(initialForm);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
+  const [submitted, setSubmitted] = useState(false);
+  const [showConfirm, setShowConfirm] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [now, setNow] = useState(() => new Date());
@@ -43,23 +45,24 @@ function AttendPage() {
   }, []);
 
   function updateField(event) {
+    if (submitted) return;
     const { name, value } = event.target;
     setForm((current) => ({ ...current, [name]: value }));
   }
 
-  async function handleSubmit(event) {
-    event.preventDefault();
+  async function submitAttendance() {
     setError('');
     setSuccess('');
 
     try {
       setSubmitting(true);
+      setShowConfirm(false);
       const response = await attendAPI.submit(token, {
         employeeId: form.employeeId,
         employeeName: form.employeeName
       });
-      setSuccess(response.data.message);
-      setForm(initialForm);
+      setSuccess('Attendance submitted successfully');
+      setSubmitted(true);
       await loadStatus();
     } catch (err) {
       setError(getApiError(err, 'Could not submit attendance.'));
@@ -67,6 +70,12 @@ function AttendPage() {
     } finally {
       setSubmitting(false);
     }
+  }
+
+  function handleSubmit(event) {
+    event.preventDefault();
+    if (submitting || submitted) return;
+    setShowConfirm(true);
   }
 
   const training = status?.training;
@@ -116,28 +125,73 @@ function AttendPage() {
               <div className="alert warning">Attendance has not opened yet.</div>
             )}
             {sessionState.key === 'closed' && (
-              <div className="alert error">
-                {training.manuallyStopped ? 'Attendance closed by admin' : 'Attendance has closed for this training.'}
+              <div className="closed-state">
+                <Clock size={26} aria-hidden="true" />
+                <strong>Attendance is closed for this session.</strong>
+                <span>{training.manuallyStopped ? 'Attendance closed by admin' : 'Attendance has closed for this training.'}</span>
               </div>
             )}
             {error && <div className="alert error">{error}</div>}
-            {success && <div className="alert success">{success}</div>}
+            {success && (
+              <div className="success-card">
+                <CheckCircle2 size={28} aria-hidden="true" />
+                <strong>{success}</strong>
+              </div>
+            )}
 
             {!closed && (
               <form className="form-panel public-form" onSubmit={handleSubmit}>
                 <label>
                   <span><IdCard size={15} aria-hidden="true" />Employee ID</span>
-                  <input name="employeeId" value={form.employeeId} onChange={updateField} required />
+                  <input name="employeeId" value={form.employeeId} onChange={updateField} disabled={submitted} required />
                 </label>
                 <label>
                   <span><UserRound size={15} aria-hidden="true" />Employee name</span>
-                  <input name="employeeName" value={form.employeeName} onChange={updateField} required />
+                  <input name="employeeName" value={form.employeeName} onChange={updateField} disabled={submitted} required />
                 </label>
-                <button className="button button-primary full" type="submit" disabled={submitting}>
+                <button className="button button-primary full" type="submit" disabled={submitting || submitted}>
                   <Send size={18} aria-hidden="true" />
-                  {submitting ? 'Submitting...' : 'Submit Attendance'}
+                  {submitting ? 'Submitting...' : submitted ? 'Attendance Submitted' : 'Submit Attendance'}
                 </button>
               </form>
+            )}
+
+            {showConfirm && (
+              <div className="modal-backdrop" role="presentation">
+                <div className="modal" role="dialog" aria-modal="true" aria-labelledby="confirm-submission-title">
+                  <h2 id="confirm-submission-title">Confirm Submission</h2>
+                  <p>Please verify your Employee ID and Name before submitting. This action cannot be changed later.</p>
+                  <dl className="confirmation-details">
+                    <div>
+                      <dt>Employee ID:</dt>
+                      <dd>{form.employeeId}</dd>
+                    </div>
+                    <div>
+                      <dt>Employee Name:</dt>
+                      <dd>{form.employeeName}</dd>
+                    </div>
+                  </dl>
+                  <div className="modal-actions">
+                    <button
+                      className="button button-secondary"
+                      type="button"
+                      onClick={() => setShowConfirm(false)}
+                      disabled={submitting}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      className="button button-primary"
+                      type="button"
+                      onClick={submitAttendance}
+                      disabled={submitting}
+                    >
+                      <Send size={18} aria-hidden="true" />
+                      {submitting ? 'Submitting...' : 'Confirm & Submit'}
+                    </button>
+                  </div>
+                </div>
+              </div>
             )}
           </>
         )}

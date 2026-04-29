@@ -50,7 +50,7 @@ function MasterAdminUsers() {
   const admins = users.filter((user) => user.role === 'ADMIN');
 
   return (
-    <section className="admin-users-section" aria-label="User management">
+    <section id="approvals" className="admin-users-section" aria-label="User management">
       <div className="section-heading">
         <div>
           <p className="eyebrow">Master Admin</p>
@@ -73,13 +73,14 @@ function MasterAdminUsers() {
           {loading ? (
             <p className="muted">Loading users...</p>
           ) : pendingUsers.length === 0 ? (
-            <p className="muted">No pending signup requests.</p>
+            <p className="muted">No pending approval requests.</p>
           ) : (
             <div className="approval-list">
               {pendingUsers.map((user) => (
                 <div className="approval-row" key={user.id}>
                   <div>
                     <strong>{user.username}</strong>
+                    <span className={`status-badge user-${user.status.toLowerCase()}`}>{user.status}</span>
                     <span className="muted block">{formatDateTime(user.createdAt)}</span>
                   </div>
                   <div className="inline-actions">

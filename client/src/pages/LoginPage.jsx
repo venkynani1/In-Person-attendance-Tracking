@@ -51,8 +51,9 @@ function LoginPage() {
             <ClipboardCheck size={22} />
           </span>
           <div>
-            <p className="eyebrow">Admin Console</p>
-            <h1>Login</h1>
+            <p className="eyebrow">Attendance Command Center</p>
+            <h1>Welcome back</h1>
+            <p className="auth-tagline">Secure QR-based attendance for in-person trainings</p>
           </div>
         </div>
 

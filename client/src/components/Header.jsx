@@ -1,5 +1,5 @@
 import { Link, NavLink } from 'react-router-dom';
-import { Building2, ClipboardCheck, LogOut, Plus, UserCircle } from 'lucide-react';
+import { ClipboardCheck, LogOut, Plus, ShieldCheck, UserCircle } from 'lucide-react';
 import { useAuth } from '../context/AuthContext.jsx';
 
 function Header() {
@@ -13,22 +13,30 @@ function Header() {
             <ClipboardCheck size={22} />
           </span>
           <span>
-            <span className="brand-title">Attendance Tracker</span>
-            <span className="brand-subtitle">
-              <Building2 size={13} aria-hidden="true" />
-              Admin Console
-            </span>
+            <span className="brand-title">Attendance Command Center</span>
+            <span className="brand-subtitle">Enterprise QR attendance</span>
           </span>
         </Link>
         <nav className="nav-actions" aria-label="Admin navigation">
           <NavLink to="/" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
             Dashboard
           </NavLink>
+          {user?.role === 'MASTER_ADMIN' && (
+            <Link to="/#approvals" className="nav-link">
+              Pending Approvals
+            </Link>
+          )}
           {user && (
-            <span className="user-chip">
-              <UserCircle size={16} aria-hidden="true" />
-              {user.username}
-            </span>
+            <div className="header-account">
+              <span className="user-chip">
+                <UserCircle size={16} aria-hidden="true" />
+                {user.username}
+              </span>
+              <span className={`role-badge role-${user.role.toLowerCase().replace('_', '-')}`}>
+                <ShieldCheck size={14} aria-hidden="true" />
+                {user.role === 'MASTER_ADMIN' ? 'MASTER ADMIN' : 'ADMIN'}
+              </span>
+            </div>
           )}
           <NavLink to="/create" className="button button-primary compact">
             <Plus size={18} aria-hidden="true" />

@@ -9,8 +9,8 @@ export function getSessionState(training, now = new Date()) {
   if (training?.manuallyStopped) {
     return {
       key: 'closed',
-      label: 'Closed',
-      badgeClass: 'closed',
+      label: 'Stopped',
+      badgeClass: 'stopped',
       targetTime: null,
       reason: 'manual'
     };
