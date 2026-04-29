@@ -1,10 +1,34 @@
 import ExcelJS from 'exceljs';
 
-const HEADERS = ['Employee ID', 'Employee Name'];
+const MONTHS = [
+  'Jan',
+  'Feb',
+  'Mar',
+  'Apr',
+  'May',
+  'Jun',
+  'Jul',
+  'Aug',
+  'Sep',
+  'Oct',
+  'Nov',
+  'Dec'
+];
 
 function safeCellValue(value) {
   if (value === undefined || value === null) return '';
   return String(value);
+}
+
+function formatTrainingDate(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+
+  const day = String(date.getDate()).padStart(2, '0');
+  const month = MONTHS[date.getMonth()];
+  const year = date.getFullYear();
+
+  return `${day}-${month}-${year}`;
 }
 
 function autoAdjustColumnWidths(sheet) {
@@ -20,13 +44,31 @@ function autoAdjustColumnWidths(sheet) {
   });
 }
 
-export function createAttendanceWorkbook(attendances = []) {
+function sortExportRows(rows) {
+  return [...rows].sort((first, second) => {
+    const firstName = safeCellValue(first?.employeeName).toLocaleLowerCase();
+    const secondName = safeCellValue(second?.employeeName).toLocaleLowerCase();
+    const nameComparison = firstName.localeCompare(secondName);
+
+    if (nameComparison !== 0) return nameComparison;
+
+    return safeCellValue(first?.employeeId).localeCompare(safeCellValue(second?.employeeId));
+  });
+}
+
+export function createAttendanceWorkbook(attendances = [], options = {}) {
   const workbook = new ExcelJS.Workbook();
   workbook.creator = 'Attendance App';
   workbook.created = new Date();
 
+  const includeStatus = options.includeStatus || attendances.some((attendance) => attendance?.status);
+  const headers = includeStatus
+    ? ['Training Date', 'Employee ID', 'Employee Name', 'Status']
+    : ['Training Date', 'Employee ID', 'Employee Name'];
+  const trainingDate = formatTrainingDate(options.trainingDate);
+
   const sheet = workbook.addWorksheet('Attendance');
-  sheet.addRow(HEADERS);
+  sheet.addRow(headers);
 
   sheet.getRow(1).font = { bold: true };
   sheet.getRow(1).fill = {
@@ -35,11 +77,18 @@ export function createAttendanceWorkbook(attendances = []) {
     fgColor: { argb: 'FFEAF2F8' }
   };
 
-  attendances.forEach((attendance) => {
-    sheet.addRow([
+  sortExportRows(attendances).forEach((attendance) => {
+    const row = [
+      trainingDate,
       safeCellValue(attendance?.employeeId),
       safeCellValue(attendance?.employeeName)
-    ]);
+    ];
+
+    if (includeStatus) {
+      row.push(safeCellValue(attendance?.status));
+    }
+
+    sheet.addRow(row);
   });
 
   autoAdjustColumnWidths(sheet);

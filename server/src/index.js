@@ -394,8 +394,12 @@ app.get('/api/trainings/:id/export', requireAuth, asyncHandler(async (req, res) 
     where: { id: req.params.id },
     select: {
       trainingName: true,
+      startDateTime: true,
       attendances: {
-        orderBy: { employeeName: 'asc' },
+        orderBy: [
+          { employeeName: 'asc' },
+          { employeeId: 'asc' }
+        ],
         select: {
           employeeId: true,
           employeeName: true
@@ -406,7 +410,9 @@ app.get('/api/trainings/:id/export', requireAuth, asyncHandler(async (req, res) 
 
   if (!training) throw createHttpError(404, 'Training not found.');
 
-  const workbook = createAttendanceWorkbook(training.attendances);
+  const workbook = createAttendanceWorkbook(training.attendances, {
+    trainingDate: training.startDateTime
+  });
   const safeName = training.trainingName.replace(/[^a-z0-9-_]+/gi, '-').replace(/-+/g, '-');
   const buffer = await workbook.xlsx.writeBuffer();
 
