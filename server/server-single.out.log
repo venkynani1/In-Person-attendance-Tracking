@@ -12,3 +12,6 @@ Attendance API listening on port 5000
 [32m[nodemon] starting `node src/index.js`[39m
 Attendance API listening on port 5000
 [31m[nodemon] app crashed - waiting for file changes before starting...[39m
+[32m[nodemon] restarting due to changes...[39m
+[32m[nodemon] starting `node src/index.js`[39m
+[31m[nodemon] app crashed - waiting for file changes before starting...[39m
