@@ -9,6 +9,30 @@ const initialForm = {
   employeeName: ''
 };
 
+function getAttendanceSubmissionKey(trainingId) {
+  return `attendance_submitted_${trainingId}`;
+}
+
+function hasAttendanceSubmissionLock(trainingId) {
+  if (!trainingId) return false;
+
+  try {
+    return localStorage.getItem(getAttendanceSubmissionKey(trainingId)) === 'true';
+  } catch (error) {
+    return false;
+  }
+}
+
+function setAttendanceSubmissionLock(trainingId) {
+  if (!trainingId) return;
+
+  try {
+    localStorage.setItem(getAttendanceSubmissionKey(trainingId), 'true');
+  } catch (error) {
+    // Ignore storage failures so attendance submission itself is not blocked.
+  }
+}
+
 function AttendPage() {
   const { token } = useParams();
   const [status, setStatus] = useState(null);
@@ -25,6 +49,10 @@ function AttendPage() {
     try {
       const response = await attendAPI.getStatus(token);
       setStatus(response.data);
+      if (hasAttendanceSubmissionLock(response.data?.training?.id)) {
+        setSubmitted(true);
+        setSuccess((current) => current || 'You have already submitted attendance for this session.');
+      }
       setError('');
     } catch (err) {
       setError(getApiError(err, 'Could not open this attendance link.'));
@@ -34,6 +62,13 @@ function AttendPage() {
   }
 
   useEffect(() => {
+    setStatus(null);
+    setForm(initialForm);
+    setSubmitted(false);
+    setShowConfirm(false);
+    setError('');
+    setSuccess('');
+    setLoading(true);
     loadStatus();
     const intervalId = window.setInterval(loadStatus, 30000);
     return () => window.clearInterval(intervalId);
@@ -47,25 +82,39 @@ function AttendPage() {
   function updateField(event) {
     if (submitted) return;
     const { name, value } = event.target;
-    setForm((current) => ({ ...current, [name]: value }));
+    const nextValue = name === 'employeeId'
+      ? value.replace(/\D/g, '').slice(0, 10)
+      : value;
+
+    setForm((current) => ({ ...current, [name]: nextValue }));
   }
 
   async function submitAttendance() {
+    if (submitting || submitted) return;
+
     setError('');
     setSuccess('');
+
+    if (!/^[0-9]{10}$/.test(form.employeeId)) {
+      setError('Employee ID must be exactly 10 digits');
+      setShowConfirm(false);
+      return;
+    }
 
     try {
       setSubmitting(true);
       setShowConfirm(false);
-      const response = await attendAPI.submit(token, {
+      await attendAPI.submit(token, {
         employeeId: form.employeeId,
         employeeName: form.employeeName
       });
+      setAttendanceSubmissionLock(status?.training?.id);
       setSuccess('Attendance submitted successfully');
       setSubmitted(true);
       await loadStatus();
     } catch (err) {
-      setError(getApiError(err, 'Could not submit attendance.'));
+      const message = getApiError(err, 'Could not submit attendance.');
+      setError(message.includes('already') ? 'Attendance already submitted' : message);
       await loadStatus();
     } finally {
       setSubmitting(false);
@@ -75,6 +124,12 @@ function AttendPage() {
   function handleSubmit(event) {
     event.preventDefault();
     if (submitting || submitted) return;
+    if (!/^[0-9]{10}$/.test(form.employeeId)) {
+      setError('Employee ID must be exactly 10 digits');
+      return;
+    }
+
+    setError('');
     setShowConfirm(true);
   }
 
@@ -143,11 +198,20 @@ function AttendPage() {
               <form className="form-panel public-form" onSubmit={handleSubmit}>
                 <label>
                   <span><IdCard size={15} aria-hidden="true" />Employee ID</span>
-                  <input name="employeeId" value={form.employeeId} onChange={updateField} disabled={submitted} required />
+                  <input
+                    name="employeeId"
+                    value={form.employeeId}
+                    onChange={updateField}
+                    disabled={submitted || submitting}
+                    inputMode="numeric"
+                    pattern="[0-9]{10}"
+                    maxLength={10}
+                    required
+                  />
                 </label>
                 <label>
                   <span><UserRound size={15} aria-hidden="true" />Employee name</span>
-                  <input name="employeeName" value={form.employeeName} onChange={updateField} disabled={submitted} required />
+                  <input name="employeeName" value={form.employeeName} onChange={updateField} disabled={submitted || submitting} required />
                 </label>
                 <button className="button button-primary full" type="submit" disabled={submitting || submitted}>
                   <Send size={18} aria-hidden="true" />
