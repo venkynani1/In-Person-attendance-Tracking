@@ -149,6 +149,18 @@ export const trainingAPI = {
       api.get(`/api/trainings/${id}/attendance`)
     );
   },
+  getNominations(id) {
+    return requestWithRetry(() =>
+      api.get(`/api/trainings/${id}/nominations`)
+    );
+  },
+  async uploadNominations(id, formData) {
+    await checkHealth();
+    return requestWithRetry(
+      () => api.post(`/api/trainings/${id}/nominations`, formData),
+      { retries: 0 }
+    );
+  },
   getQrImage(id) {
     return requestWithRetry(() =>
       api.get(`/api/trainings/${id}/qr`, {

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { CalendarClock, Check, CircleStop, Copy, Download, ExternalLink, Link2, MapPin, MonitorUp, RefreshCw, Sparkles, Timer, Trash2, Upload, UserX, UsersRound } from 'lucide-react';
 import Header from '../components/Header.jsx';
@@ -8,12 +8,17 @@ import { formatDateTime, getCountdownMessage, getSessionState, getSmartSummaryIt
 function TrainingDetails() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const nominationFileInputRef = useRef(null);
   const [training, setTraining] = useState(null);
   const [attendance, setAttendance] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [copied, setCopied] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const [selectedNominationFile, setSelectedNominationFile] = useState(null);
+  const [uploadingNominations, setUploadingNominations] = useState(false);
+  const [nominationMessage, setNominationMessage] = useState('');
+  const [nominationError, setNominationError] = useState('');
   const [stopping, setStopping] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [showStopConfirm, setShowStopConfirm] = useState(false);
@@ -103,6 +108,42 @@ function TrainingDetails() {
     }
   }
 
+  function handleNominationFileChange(event) {
+    const file = event.target.files?.[0] || null;
+    setSelectedNominationFile(file);
+    setNominationMessage('');
+    setNominationError('');
+  }
+
+  async function uploadNominations() {
+    if (!selectedNominationFile || uploadingNominations) return;
+
+    try {
+      setUploadingNominations(true);
+      setNominationMessage('');
+      setNominationError('');
+
+      const formData = new FormData();
+      formData.append('nominationsFile', selectedNominationFile);
+
+      const response = await trainingAPI.uploadNominations(id, formData);
+      setNominationMessage('Nominations uploaded successfully');
+      setSelectedNominationFile(null);
+      if (nominationFileInputRef.current) {
+        nominationFileInputRef.current.value = '';
+      }
+      setTraining((current) => current ? {
+        ...current,
+        nominatedCount: response.data.nominatedCount ?? current.nominatedCount
+      } : current);
+      await loadDetails({ silent: true });
+    } catch (err) {
+      setNominationError(getApiError(err, 'Failed to upload nominations.'));
+    } finally {
+      setUploadingNominations(false);
+    }
+  }
+
   async function stopAttendance() {
     try {
       setStopping(true);
@@ -177,10 +218,6 @@ function TrainingDetails() {
                   <Download size={18} aria-hidden="true" />
                   {exporting ? 'Exporting...' : 'Download Report'}
                 </button>
-                <button className="button button-secondary compact" type="button" disabled>
-                  <Upload size={18} aria-hidden="true" />
-                  Upload Nominations
-                </button>
                 {canStopAttendance && (
                   <button className="button button-danger compact" type="button" onClick={() => setShowStopConfirm(true)}>
                     <CircleStop size={18} aria-hidden="true" />
@@ -244,6 +281,40 @@ function TrainingDetails() {
                   <li key={item}>{item}</li>
                 ))}
               </ul>
+            </section>
+
+            <section className="panel nominations-panel" aria-label="Upload nominations">
+              <div className="panel-heading">
+                <span className="section-icon"><Upload size={18} aria-hidden="true" /></span>
+                <h2>Upload Nominations</h2>
+              </div>
+              {nominationMessage && <div className="alert success">{nominationMessage}</div>}
+              {nominationError && <div className="alert error">{nominationError}</div>}
+              <div className="upload-row">
+                <label className="file-upload-control">
+                  <span>Nominations Excel</span>
+                  <input
+                    ref={nominationFileInputRef}
+                    type="file"
+                    accept=".xlsx,.xls"
+                    onChange={handleNominationFileChange}
+                    disabled={uploadingNominations}
+                  />
+                </label>
+                <div className="selected-file" aria-live="polite">
+                  <span>Selected file</span>
+                  <strong>{selectedNominationFile?.name || 'No file selected'}</strong>
+                </div>
+                <button
+                  className="button button-primary"
+                  type="button"
+                  onClick={uploadNominations}
+                  disabled={!selectedNominationFile || uploadingNominations}
+                >
+                  <Upload size={18} aria-hidden="true" />
+                  {uploadingNominations ? 'Uploading...' : 'Upload Nominations'}
+                </button>
+              </div>
             </section>
 
             <section className="details-grid">

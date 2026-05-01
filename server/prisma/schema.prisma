@@ -21,6 +21,7 @@ model Training {
   createdAt       DateTime     @default(now())
   updatedAt       DateTime     @updatedAt
   attendances     Attendance[]
+  nominations     Nomination[]
 }
 
 model Attendance {
@@ -30,6 +31,18 @@ model Attendance {
   employeeId   String
   employeeName String
   submittedAt  DateTime @default(now())
+
+  @@unique([trainingId, employeeId])
+}
+
+model Nomination {
+  id           String   @id @default(uuid()) @db.Uuid
+  trainingId   String   @db.Uuid
+  training     Training @relation(fields: [trainingId], references: [id], onDelete: Cascade)
+  employeeId   String
+  employeeName String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 
   @@unique([trainingId, employeeId])
 }

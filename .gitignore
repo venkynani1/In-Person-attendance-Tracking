@@ -9,3 +9,5 @@ server/.env
 
 dist/
 client/dist/
+
+*.log

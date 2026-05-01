@@ -4,7 +4,9 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import express from 'express';
 import jwt from 'jsonwebtoken';
+import multer from 'multer';
 import QRCode from 'qrcode';
+import XLSX from 'xlsx';
 import { Prisma, PrismaClient } from '@prisma/client';
 import { createAttendanceWorkbook } from './utils/excelExport.js';
 
@@ -15,6 +17,22 @@ const prisma = new PrismaClient();
 const port = process.env.PORT || 4000;
 const clientUrl = process.env.CLIENT_URL || 'http://localhost:5173';
 const publicBaseUrl = process.env.PUBLIC_BASE_URL || clientUrl;
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 8 * 1024 * 1024
+  },
+  fileFilter(req, file, callback) {
+    if (/\.(xlsx|xls)$/i.test(file.originalname)) {
+      callback(null, true);
+      return;
+    }
+
+    const error = createHttpError(400, 'Please upload an Excel file with .xlsx or .xls extension.');
+    callback(error);
+  }
+});
+let nominationTableReadyPromise = null;
 
 const allowedOrigins = [
   process.env.CLIENT_URL,
@@ -43,6 +61,183 @@ function createHttpError(status, message) {
   const error = new Error(message);
   error.status = status;
   return error;
+}
+
+function normalizeHeader(value) {
+  return String(value || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+function normalizeCell(value) {
+  if (value === undefined || value === null) return '';
+  return String(value).trim();
+}
+
+function readNominationCell(row, aliases) {
+  const normalizedAliases = new Set(aliases.map(normalizeHeader));
+  let matchedValue = '';
+
+  for (const [key, value] of Object.entries(row)) {
+    if (normalizedAliases.has(normalizeHeader(key))) {
+      const cellValue = normalizeCell(value);
+      if (cellValue) return cellValue;
+      matchedValue = cellValue;
+    }
+  }
+
+  return matchedValue;
+}
+
+function parseNominationsWorkbook(buffer) {
+  let workbook;
+
+  try {
+    workbook = XLSX.read(buffer, {
+      type: 'buffer',
+      cellDates: false,
+      raw: false
+    });
+  } catch (error) {
+    throw createHttpError(400, 'Could not read the Excel file.');
+  }
+
+  const firstSheetName = workbook.SheetNames[0];
+  if (!firstSheetName) {
+    throw createHttpError(400, 'The Excel file does not contain any sheets.');
+  }
+
+  const rows = XLSX.utils.sheet_to_json(workbook.Sheets[firstSheetName], {
+    defval: '',
+    raw: false
+  });
+
+  const nominationsByEmployeeId = new Map();
+  const employeeIdHeaders = ['Employee ID', 'EMP_ID', 'Emp ID', 'employeeId'];
+  const employeeNameHeaders = ['Employee Name', 'EMP_NAME', 'Name', 'employeeName'];
+
+  rows.forEach((row, index) => {
+    const employeeId = readNominationCell(row, employeeIdHeaders);
+    const employeeName = readNominationCell(row, employeeNameHeaders);
+
+    if (!employeeId && !employeeName) return;
+
+    if (!employeeId || !employeeName) {
+      throw createHttpError(400, `Row ${index + 2} must include Employee ID and Employee Name.`);
+    }
+
+    nominationsByEmployeeId.set(employeeId, {
+      employeeId,
+      employeeName
+    });
+  });
+
+  const nominations = [...nominationsByEmployeeId.values()];
+  if (nominations.length === 0) {
+    throw createHttpError(400, 'No nominations were found in the Excel file.');
+  }
+
+  return nominations;
+}
+
+function buildExportRows(nominations = [], attendances = []) {
+  const attendanceByEmployeeId = new Map(
+    attendances.map((attendance) => [attendance.employeeId, attendance])
+  );
+  const nominationByEmployeeId = new Map(
+    nominations.map((nomination) => [nomination.employeeId, nomination])
+  );
+
+  const nominatedRows = nominations.map((nomination) => ({
+    employeeId: nomination.employeeId,
+    employeeName: nomination.employeeName,
+    status: attendanceByEmployeeId.has(nomination.employeeId) ? 'Present' : 'Absent'
+  }));
+
+  const extraAttendanceRows = attendances
+    .filter((attendance) => !nominationByEmployeeId.has(attendance.employeeId))
+    .map((attendance) => ({
+      employeeId: attendance.employeeId,
+      employeeName: attendance.employeeName,
+      status: 'Present'
+    }));
+
+  return [...nominatedRows, ...extraAttendanceRows];
+}
+
+function isMissingNominationTableError(error) {
+  return error instanceof Prisma.PrismaClientKnownRequestError &&
+    error.code === 'P2010' &&
+    error.meta?.code === '42P01';
+}
+
+async function ensureNominationTable() {
+  if (!nominationTableReadyPromise) {
+    nominationTableReadyPromise = (async () => {
+      await prisma.$executeRawUnsafe(`
+        CREATE TABLE IF NOT EXISTS "Nomination" (
+          "id" UUID NOT NULL,
+          "trainingId" UUID NOT NULL,
+          "employeeId" TEXT NOT NULL,
+          "employeeName" TEXT NOT NULL,
+          "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          "updatedAt" TIMESTAMP(3) NOT NULL,
+          CONSTRAINT "Nomination_pkey" PRIMARY KEY ("id")
+        );
+      `);
+      await prisma.$executeRawUnsafe(`
+        CREATE UNIQUE INDEX IF NOT EXISTS "Nomination_trainingId_employeeId_key"
+        ON "Nomination"("trainingId", "employeeId");
+      `);
+      await prisma.$executeRawUnsafe(`
+        DO $$
+        BEGIN
+          IF NOT EXISTS (
+            SELECT 1
+            FROM pg_constraint
+            WHERE conname = 'Nomination_trainingId_fkey'
+          ) THEN
+            ALTER TABLE "Nomination"
+            ADD CONSTRAINT "Nomination_trainingId_fkey"
+            FOREIGN KEY ("trainingId") REFERENCES "Training"("id")
+            ON DELETE CASCADE ON UPDATE CASCADE;
+          END IF;
+        END $$;
+      `);
+    })().catch((error) => {
+      nominationTableReadyPromise = null;
+      throw error;
+    });
+  }
+
+  return nominationTableReadyPromise;
+}
+
+async function getNominationCounts(trainingIds) {
+  if (trainingIds.length === 0) return new Map();
+
+  try {
+    const rows = await prisma.$queryRaw`
+      SELECT "trainingId"::text AS "trainingId", COUNT(*)::int AS "count"
+      FROM "Nomination"
+      WHERE "trainingId"::text IN (${Prisma.join(trainingIds)})
+      GROUP BY "trainingId"
+    `;
+
+    return new Map(rows.map((row) => [row.trainingId, Number(row.count)]));
+  } catch (error) {
+    if (isMissingNominationTableError(error)) {
+      return new Map();
+    }
+
+    throw error;
+  }
+}
+
+async function trainingResponses(trainings) {
+  const nominationCounts = await getNominationCounts(trainings.map((training) => training.id));
+  return trainings.map((training) => trainingResponse(
+    training,
+    nominationCounts.get(training.id) || 0
+  ));
 }
 
 function getJwtSecret() {
@@ -144,11 +339,12 @@ function getTrainingStatus(training) {
   return 'open';
 }
 
-function trainingResponse(training) {
+function trainingResponse(training, nominatedCount = 0) {
   return {
     ...training,
     attendanceLink: buildAttendanceLink(training.token),
-    status: getTrainingStatus(training)
+    status: getTrainingStatus(training),
+    nominatedCount
   };
 }
 
@@ -342,7 +538,7 @@ app.get('/api/trainings', requireAuth, asyncHandler(async (req, res) => {
     }
   });
 
-  res.json(trainings.map(trainingResponse));
+  res.json(await trainingResponses(trainings));
 }));
 
 app.get('/api/trainings/:id', requireAuth, asyncHandler(async (req, res) => {
@@ -354,7 +550,7 @@ app.get('/api/trainings/:id', requireAuth, asyncHandler(async (req, res) => {
   });
 
   if (!training) throw createHttpError(404, 'Training not found.');
-  res.json(trainingResponse(training));
+  res.json((await trainingResponses([training]))[0]);
 }));
 
 app.get('/api/trainings/:id/qr', requireAuth, asyncHandler(async (req, res) => {
@@ -389,7 +585,74 @@ app.get('/api/trainings/:id/attendance', requireAuth, asyncHandler(async (req, r
   res.json(attendances);
 }));
 
+app.get('/api/trainings/:id/nominations', requireAuth, asyncHandler(async (req, res) => {
+  await ensureNominationTable();
+
+  const training = await prisma.training.findUnique({ where: { id: req.params.id } });
+  if (!training) throw createHttpError(404, 'Training not found.');
+
+  const nominations = await prisma.nomination.findMany({
+    where: { trainingId: req.params.id },
+    orderBy: [
+      { employeeName: 'asc' },
+      { employeeId: 'asc' }
+    ],
+    select: {
+      employeeId: true,
+      employeeName: true
+    }
+  });
+
+  res.json(nominations);
+}));
+
+app.post('/api/trainings/:id/nominations', requireAuth, upload.single('nominationsFile'), asyncHandler(async (req, res) => {
+  await ensureNominationTable();
+
+  const training = await prisma.training.findUnique({ where: { id: req.params.id } });
+  if (!training) throw createHttpError(404, 'Training not found.');
+
+  if (!req.file) {
+    throw createHttpError(400, 'Please select a nominations Excel file.');
+  }
+
+  const nominations = parseNominationsWorkbook(req.file.buffer);
+
+  await prisma.$transaction(
+    nominations.map((nomination) =>
+      prisma.nomination.upsert({
+        where: {
+          trainingId_employeeId: {
+            trainingId: req.params.id,
+            employeeId: nomination.employeeId
+          }
+        },
+        update: {
+          employeeName: nomination.employeeName
+        },
+        create: {
+          trainingId: req.params.id,
+          employeeId: nomination.employeeId,
+          employeeName: nomination.employeeName
+        }
+      })
+    )
+  );
+
+  const nominatedCount = await prisma.nomination.count({
+    where: { trainingId: req.params.id }
+  });
+
+  res.json({
+    message: 'Nominations uploaded successfully',
+    uploadedCount: nominations.length,
+    nominatedCount
+  });
+}));
+
 app.get('/api/trainings/:id/export', requireAuth, asyncHandler(async (req, res) => {
+  await ensureNominationTable();
+
   const training = await prisma.training.findUnique({
     where: { id: req.params.id },
     select: {
@@ -404,14 +667,25 @@ app.get('/api/trainings/:id/export', requireAuth, asyncHandler(async (req, res) 
           employeeId: true,
           employeeName: true
         }
+      },
+      nominations: {
+        orderBy: [
+          { employeeName: 'asc' },
+          { employeeId: 'asc' }
+        ],
+        select: {
+          employeeId: true,
+          employeeName: true
+        }
       }
     },
   });
 
   if (!training) throw createHttpError(404, 'Training not found.');
 
-  const workbook = createAttendanceWorkbook(training.attendances, {
-    trainingDate: training.startDateTime
+  const workbook = createAttendanceWorkbook(buildExportRows(training.nominations, training.attendances), {
+    trainingDate: training.startDateTime,
+    includeStatus: true
   });
   const safeName = training.trainingName.replace(/[^a-z0-9-_]+/gi, '-').replace(/-+/g, '-');
   const buffer = await workbook.xlsx.writeBuffer();
@@ -432,7 +706,7 @@ app.patch('/api/trainings/:id/stop', requireAuth, asyncHandler(async (req, res) 
 
   if (!training) throw createHttpError(404, 'Training not found.');
   if (training.manuallyStopped) {
-    res.json(trainingResponse(training));
+    res.json((await trainingResponses([training]))[0]);
     return;
   }
 
@@ -451,7 +725,7 @@ app.patch('/api/trainings/:id/stop', requireAuth, asyncHandler(async (req, res) 
     }
   });
 
-  res.json(trainingResponse(stoppedTraining));
+  res.json((await trainingResponses([stoppedTraining]))[0]);
 }));
 
 app.delete('/api/trainings/:id', requireAuth, asyncHandler(async (req, res) => {
@@ -522,6 +796,14 @@ app.use((req, res) => {
 });
 
 app.use((error, req, res, next) => {
+  if (error instanceof multer.MulterError) {
+    const message = error.code === 'LIMIT_FILE_SIZE'
+      ? 'Nominations file must be 8 MB or smaller.'
+      : 'Could not upload nominations file.';
+    res.status(400).json({ error: message });
+    return;
+  }
+
   if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
     const target = Array.isArray(error.meta?.target) ? error.meta.target : [];
     const message = target.includes('username')
