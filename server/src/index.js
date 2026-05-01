@@ -37,22 +37,29 @@ let trainingOwnershipReadyPromise = null;
 let passwordResetColumnsReadyPromise = null;
 
 const allowedOrigins = [
-  process.env.CLIENT_URL,
+  'https://in-person-attendance-tracking.vercel.app',
   'http://localhost:5173',
   'http://127.0.0.1:5173',
-  'https://in-person-attendance-tracking.vercel.app'
+  process.env.CLIENT_URL
 ].filter(Boolean);
 
-app.use(cors({
+const corsOptions = {
   origin(origin, callback) {
-    if (!origin || allowedOrigins.includes(origin)) {
+    if (!origin) return callback(null, true);
+
+    if (
+      allowedOrigins.includes(origin) ||
+      origin.endsWith('.vercel.app')
+    ) {
       return callback(null, true);
     }
 
-    return callback(new Error(`CORS blocked for origin: ${origin}`));
+    return callback(new Error('Not allowed by CORS'));
   },
   credentials: true
-}));
+};
+
+app.use(cors(corsOptions));
 app.use(express.json());
 
 function asyncHandler(handler) {
