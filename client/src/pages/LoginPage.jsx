@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Link, Navigate, useNavigate } from 'react-router-dom';
+import { Link, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { ClipboardCheck, LogIn } from 'lucide-react';
 import { useAuth } from '../context/AuthContext.jsx';
 import { getApiError } from '../services/api.js';
@@ -10,6 +10,7 @@ const initialForm = {
 };
 
 function LoginPage() {
+  const location = useLocation();
   const navigate = useNavigate();
   const { user, login } = useAuth();
   const [form, setForm] = useState(initialForm);
@@ -55,6 +56,7 @@ function LoginPage() {
         </div>
 
         {error && <div className="alert error">{error}</div>}
+        {location.state?.message && <div className="alert success">{location.state.message}</div>}
 
         <form className="form-panel public-form" onSubmit={handleSubmit}>
           <label>
@@ -78,6 +80,9 @@ function LoginPage() {
           </button>
         </form>
 
+        <p className="auth-footnote">
+          <Link to="/forgot-password">Forgot Password?</Link>
+        </p>
         <p className="auth-footnote">
           Need access? <Link to="/signup">Submit a signup request</Link>
         </p>

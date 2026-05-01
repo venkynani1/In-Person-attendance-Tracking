@@ -26,6 +26,8 @@ function isPublicRoute() {
   return (
     window.location.pathname === '/login' ||
     window.location.pathname === '/signup' ||
+    window.location.pathname === '/forgot-password' ||
+    window.location.pathname === '/reset-password' ||
     window.location.pathname.startsWith('/attend/')
   );
 }
@@ -209,6 +211,18 @@ export const authAPI = {
   signup(payload) {
     return requestWithRetry(() =>
       api.post('/api/auth/signup', payload),
+      { retries: 0 }
+    );
+  },
+  forgotPassword(payload) {
+    return requestWithRetry(() =>
+      api.post('/api/auth/forgot-password', payload),
+      { retries: 0 }
+    );
+  },
+  resetPassword(payload) {
+    return requestWithRetry(() =>
+      api.post('/api/auth/reset-password', payload),
       { retries: 0 }
     );
   },

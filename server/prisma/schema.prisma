@@ -50,14 +50,16 @@ model Nomination {
 }
 
 model User {
-  id           String     @id @default(uuid()) @db.Uuid
-  username     String     @unique
-  passwordHash String
-  role         UserRole   @default(ADMIN)
-  status       UserStatus @default(PENDING)
-  createdAt    DateTime   @default(now())
-  updatedAt    DateTime   @updatedAt
-  trainings    Training[]
+  id                String     @id @default(uuid()) @db.Uuid
+  username          String     @unique
+  passwordHash      String
+  role              UserRole   @default(ADMIN)
+  status            UserStatus @default(PENDING)
+  resetToken        String?    @unique
+  resetTokenExpires DateTime?
+  createdAt         DateTime   @default(now())
+  updatedAt         DateTime   @updatedAt
+  trainings         Training[]
 
   @@map("users")
 }

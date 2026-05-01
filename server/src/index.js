@@ -34,6 +34,7 @@ const upload = multer({
 });
 let nominationTableReadyPromise = null;
 let trainingOwnershipReadyPromise = null;
+let passwordResetColumnsReadyPromise = null;
 
 const allowedOrigins = [
   process.env.CLIENT_URL,
@@ -349,6 +350,41 @@ function signToken(user) {
   );
 }
 
+function assertApprovedForPasswordReset(user) {
+  if (user.status === 'PENDING') {
+    throw createHttpError(403, 'Your account is waiting for master admin approval.');
+  }
+
+  if (user.status === 'REJECTED') {
+    throw createHttpError(403, 'Your signup request was rejected.');
+  }
+
+  if (user.status !== 'APPROVED') {
+    throw createHttpError(403, 'Only approved users can reset password.');
+  }
+}
+
+async function ensurePasswordResetColumns() {
+  if (!passwordResetColumnsReadyPromise) {
+    passwordResetColumnsReadyPromise = (async () => {
+      await prisma.$executeRawUnsafe(`
+        ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "resetToken" TEXT;
+      `);
+      await prisma.$executeRawUnsafe(`
+        ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "resetTokenExpires" TIMESTAMP(3);
+      `);
+      await prisma.$executeRawUnsafe(`
+        CREATE UNIQUE INDEX IF NOT EXISTS "users_resetToken_key" ON "users"("resetToken");
+      `);
+    })().catch((error) => {
+      passwordResetColumnsReadyPromise = null;
+      throw error;
+    });
+  }
+
+  return passwordResetColumnsReadyPromise;
+}
+
 async function requireAuth(req, res, next) {
   try {
     const authHeader = req.get('authorization') || '';
@@ -445,6 +481,8 @@ app.get('/api/health', (req, res) => {
 });
 
 app.post('/api/auth/signup', asyncHandler(async (req, res) => {
+  await ensurePasswordResetColumns();
+
   const { username, password, confirmPassword } = req.body;
 
   if (!username?.trim() || !password) {
@@ -476,6 +514,8 @@ app.post('/api/auth/signup', asyncHandler(async (req, res) => {
 }));
 
 app.post('/api/auth/login', asyncHandler(async (req, res) => {
+  await ensurePasswordResetColumns();
+
   const { username, password } = req.body;
 
   if (!username?.trim() || !password) {
@@ -503,6 +543,92 @@ app.post('/api/auth/login', asyncHandler(async (req, res) => {
   res.json({
     token: signToken(user),
     user: publicUser(user)
+  });
+}));
+
+app.post('/api/auth/forgot-password', asyncHandler(async (req, res) => {
+  await ensurePasswordResetColumns();
+
+  const { username } = req.body;
+
+  if (!username?.trim()) {
+    throw createHttpError(400, 'Username is required.');
+  }
+
+  const user = await prisma.user.findUnique({
+    where: { username: username.trim() },
+    select: {
+      username: true,
+      status: true
+    }
+  });
+
+  if (!user) {
+    throw createHttpError(404, 'User not found');
+  }
+
+  assertApprovedForPasswordReset(user);
+
+  const token = crypto.randomBytes(32).toString('hex');
+  const resetTokenExpires = new Date(Date.now() + 15 * 60 * 1000);
+
+  await prisma.user.update({
+    where: { username: user.username },
+    data: {
+      resetToken: token,
+      resetTokenExpires
+    }
+  });
+
+  res.json({
+    token
+  });
+}));
+
+app.post('/api/auth/reset-password', asyncHandler(async (req, res) => {
+  await ensurePasswordResetColumns();
+
+  const { token, newPassword } = req.body;
+
+  if (!token || !newPassword) {
+    throw createHttpError(400, 'Invalid or expired token');
+  }
+
+  if (newPassword.length < 6) {
+    throw createHttpError(400, 'Password must be at least 6 characters.');
+  }
+
+  const user = await prisma.user.findUnique({
+    where: { resetToken: token },
+    select: {
+      id: true,
+      status: true,
+      resetTokenExpires: true
+    }
+  });
+
+  if (!user) {
+    throw createHttpError(400, 'Invalid or expired token');
+  }
+
+  if (!user.resetTokenExpires || user.resetTokenExpires <= new Date()) {
+    throw createHttpError(400, 'Invalid or expired token');
+  }
+
+  assertApprovedForPasswordReset(user);
+
+  const passwordHash = await bcrypt.hash(newPassword, 12);
+  await prisma.user.update({
+    where: { id: user.id },
+    data: {
+      passwordHash,
+      resetToken: null,
+      resetTokenExpires: null
+    }
+  });
+
+  res.json({
+    message: 'Password updated successfully. Please login.'
   });
 }));
 
