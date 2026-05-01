@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Link, Navigate, useLocation, useNavigate } from 'react-router-dom';
+import { Link, Navigate, useNavigate } from 'react-router-dom';
 import { ClipboardCheck, LogIn } from 'lucide-react';
 import { useAuth } from '../context/AuthContext.jsx';
 import { getApiError } from '../services/api.js';
@@ -10,7 +10,6 @@ const initialForm = {
 };
 
 function LoginPage() {
-  const location = useLocation();
   const navigate = useNavigate();
   const { user, login } = useAuth();
   const [form, setForm] = useState(initialForm);
@@ -33,9 +32,7 @@ function LoginPage() {
     try {
       setSubmitting(true);
       await login(form);
-      const params = new URLSearchParams(location.search);
-      const destination = params.get('redirect') || location.state?.from?.pathname || '/';
-      navigate(destination, { replace: true });
+      navigate('/', { replace: true });
     } catch (err) {
       setError(getApiError(err, 'Could not log in.'));
     } finally {

@@ -46,9 +46,9 @@ function AdminDashboard() {
   }
 
   useEffect(() => {
-    if (!token) return;
+    if (!token || !user) return;
     loadTrainings();
-  }, [token]);
+  }, [token, user]);
 
   useEffect(() => {
     const intervalId = window.setInterval(() => setNow(new Date()), 1000);

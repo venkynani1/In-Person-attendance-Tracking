@@ -33,9 +33,7 @@ function isPublicRoute() {
 function redirectToLogin() {
   if (isPublicRoute()) return;
 
-  const currentPath = `${window.location.pathname}${window.location.search}`;
-  const loginUrl = `/login?redirect=${encodeURIComponent(currentPath)}`;
-  window.location.replace(loginUrl);
+  window.location.replace('/login');
 }
 
 api.interceptors.request.use((config) => {

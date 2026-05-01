@@ -1,9 +1,15 @@
-import { Link, NavLink } from 'react-router-dom';
+import { Link, NavLink, useNavigate } from 'react-router-dom';
 import { ClipboardCheck, LogOut, Plus, ShieldCheck, UserCircle } from 'lucide-react';
 import { useAuth } from '../context/AuthContext.jsx';
 
 function Header() {
   const { user, logout } = useAuth();
+  const navigate = useNavigate();
+
+  function handleLogout() {
+    logout();
+    navigate('/login', { replace: true });
+  }
 
   return (
     <header className="app-header">
@@ -42,7 +48,7 @@ function Header() {
             <Plus size={18} aria-hidden="true" />
             New Training
           </NavLink>
-          <button className="icon-button" type="button" onClick={logout} title="Logout">
+          <button className="icon-button" type="button" onClick={handleLogout} title="Logout">
             <LogOut size={18} aria-hidden="true" />
             <span className="sr-only">Logout</span>
           </button>

@@ -13,6 +13,7 @@ function TrainingDetails() {
   const [attendance, setAttendance] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [accessDenied, setAccessDenied] = useState(false);
   const [copied, setCopied] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [selectedNominationFile, setSelectedNominationFile] = useState(null);
@@ -35,9 +36,18 @@ function TrainingDetails() {
       ]);
       setTraining(trainingResponse.data);
       setAttendance(attendanceResponse.data);
+      setAccessDenied(false);
       setError('');
     } catch (err) {
-      setError(getApiError(err, 'Failed to load training details.'));
+      if (err.response?.status === 403) {
+        setTraining(null);
+        setAttendance([]);
+        setAccessDenied(true);
+        setError('');
+      } else {
+        setAccessDenied(false);
+        setError(getApiError(err, 'Failed to load training details.'));
+      }
     } finally {
       setLoading(false);
     }
@@ -66,7 +76,14 @@ function TrainingDetails() {
           window.URL.revokeObjectURL(objectUrl);
         }
       } catch (err) {
-        if (active) setError(getApiError(err, 'Failed to load QR code.'));
+        if (active) {
+          if (err.response?.status === 403) {
+            setAccessDenied(true);
+            setError('');
+          } else {
+            setError(getApiError(err, 'Failed to load QR code.'));
+          }
+        }
       }
     }
 
@@ -191,6 +208,14 @@ function TrainingDetails() {
           <section className="empty-state">
             <div className="spinner" />
             <p>Loading training details. The backend may be waking up if it has been idle.</p>
+          </section>
+        ) : accessDenied ? (
+          <section className="empty-state">
+            <h2>Access denied</h2>
+            <p>You do not have access to this training.</p>
+            <Link to="/" className="button button-primary">
+              Back to Dashboard
+            </Link>
           </section>
         ) : training ? (
           <>
