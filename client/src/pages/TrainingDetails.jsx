@@ -317,7 +317,7 @@ function TrainingDetails() {
               {nominationError && <div className="alert error">{nominationError}</div>}
               <div className="upload-row">
                 <label className="file-upload-control">
-                  <span>Nominations Excel</span>
+                  <span><Upload size={18} aria-hidden="true" />Nominations Excel</span>
                   <input
                     ref={nominationFileInputRef}
                     type="file"

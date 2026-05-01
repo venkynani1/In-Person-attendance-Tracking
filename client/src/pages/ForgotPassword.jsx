@@ -52,7 +52,7 @@ function ForgotPassword() {
           <div>
             <p className="eyebrow">Account Recovery</p>
             <h1>Forgot password</h1>
-            <p className="auth-tagline">Approved admins can reset their password.</p>
+            <p className="auth-tagline">Generate a secure reset link for approved accounts.</p>
           </div>
         </div>
 

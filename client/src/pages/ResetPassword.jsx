@@ -73,7 +73,7 @@ function ResetPassword() {
           <div>
             <p className="eyebrow">Account Recovery</p>
             <h1>Reset password</h1>
-            <p className="auth-tagline">Choose a new password before your reset link expires.</p>
+            <p className="auth-tagline">Create a new password using your secure reset token.</p>
           </div>
         </div>
 

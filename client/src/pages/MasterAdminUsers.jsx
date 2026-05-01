@@ -69,11 +69,16 @@ function MasterAdminUsers() {
           <div className="panel-heading">
             <span className="section-icon"><ShieldCheck size={18} aria-hidden="true" /></span>
             <h2>Pending Signup Requests</h2>
+            <span className="count-badge">{pendingUsers.length}</span>
           </div>
           {loading ? (
-            <p className="muted">Loading users...</p>
+            <div className="mini-skeleton-list" aria-label="Loading pending users">
+              <span />
+              <span />
+              <span />
+            </div>
           ) : pendingUsers.length === 0 ? (
-            <p className="muted">No pending approval requests.</p>
+            <div className="panel-empty">No pending approvals</div>
           ) : (
             <div className="approval-list">
               {pendingUsers.map((user) => (
@@ -114,12 +119,17 @@ function MasterAdminUsers() {
         <div className="panel">
           <div className="panel-heading">
             <span className="section-icon"><ShieldCheck size={18} aria-hidden="true" /></span>
-            <h2>All Admins</h2>
+            <h2>Admin Directory</h2>
+            <span className="count-badge">{admins.length}</span>
           </div>
           {loading ? (
-            <p className="muted">Loading admins...</p>
+            <div className="mini-skeleton-list" aria-label="Loading admins">
+              <span />
+              <span />
+              <span />
+            </div>
           ) : admins.length === 0 ? (
-            <p className="muted">No admin users found.</p>
+            <div className="panel-empty">All admin users are listed here</div>
           ) : (
             <div className="compact-table-shell">
               <table>

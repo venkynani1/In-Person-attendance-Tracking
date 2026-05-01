@@ -108,6 +108,9 @@ function AdminDashboard() {
   const totalAttendance = trainings.reduce((sum, training) => sum + (training._count?.attendances || 0), 0);
   const closedCount = trainings.filter((training) => getSessionState(training, now).key === 'closed').length;
   const dashboardTitle = user?.role === 'MASTER_ADMIN' ? 'All Trainings' : 'My Trainings';
+  const dashboardSubtitle = user?.role === 'MASTER_ADMIN'
+    ? 'Monitor every training session across administrators.'
+    : 'Manage the trainings you created and track attendance in real time.';
   const filteredTrainings = trainings.filter((training) => {
     const matchesSearch = training.trainingName.toLowerCase().includes(searchQuery.trim().toLowerCase());
     const matchesStatus = statusFilter === 'all' || getDashboardStatus(training, now) === statusFilter;
@@ -123,7 +126,7 @@ function AdminDashboard() {
             <p className="eyebrow">Admin</p>
             <h1>{dashboardTitle}</h1>
             {user && <p className="page-subtitle account-line">Logged in as <strong>{user.username}</strong></p>}
-            <p className="page-subtitle">Monitor active training sessions, attendance capture, and exports from one operational view.</p>
+            <p className="page-subtitle">{dashboardSubtitle}</p>
           </div>
           <div className="actions-row">
             <button className="button button-secondary compact" type="button" onClick={loadTrainings}>
@@ -170,21 +173,21 @@ function AdminDashboard() {
               <article className="kpi-card">
                 <span className="kpi-icon success"><UserCheck size={20} aria-hidden="true" /></span>
                 <div>
-                  <p className="kpi-label">Open sessions</p>
+                  <p className="kpi-label">Active</p>
                   <strong>{openCount}</strong>
                 </div>
               </article>
               <article className="kpi-card">
                 <span className="kpi-icon info"><UsersRound size={20} aria-hidden="true" /></span>
                 <div>
-                  <p className="kpi-label">Attendance records</p>
+                  <p className="kpi-label">Attendance Captured</p>
                   <strong>{totalAttendance}</strong>
                 </div>
               </article>
               <article className="kpi-card">
                 <span className="kpi-icon warning"><MapPin size={20} aria-hidden="true" /></span>
                 <div>
-                  <p className="kpi-label">Closed trainings</p>
+                  <p className="kpi-label">Closed</p>
                   <strong>{closedCount}</strong>
                 </div>
               </article>

@@ -51,7 +51,7 @@ function LoginPage() {
           <div>
             <p className="eyebrow">Attendance Command Center</p>
             <h1>Welcome back</h1>
-            <p className="auth-tagline">Secure QR-based attendance for in-person trainings</p>
+            <p className="auth-tagline">Secure QR-based attendance for enterprise training sessions.</p>
           </div>
         </div>
 

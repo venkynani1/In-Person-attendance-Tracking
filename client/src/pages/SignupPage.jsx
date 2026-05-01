@@ -58,7 +58,7 @@ function SignupPage() {
           <div>
             <p className="eyebrow">Admin Access</p>
             <h1>Request access</h1>
-            <p className="auth-tagline">Signup requests require master admin approval.</p>
+            <p className="auth-tagline">Request access. Master admin approval is required.</p>
           </div>
         </div>
 
