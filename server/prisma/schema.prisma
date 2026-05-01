@@ -18,6 +18,8 @@ model Training {
   token           String       @unique
   manuallyStopped Boolean      @default(false)
   stoppedAt       DateTime?
+  createdById     String?      @db.Uuid
+  createdBy       User?        @relation(fields: [createdById], references: [id])
   createdAt       DateTime     @default(now())
   updatedAt       DateTime     @updatedAt
   attendances     Attendance[]
@@ -55,6 +57,7 @@ model User {
   status       UserStatus @default(PENDING)
   createdAt    DateTime   @default(now())
   updatedAt    DateTime   @updatedAt
+  trainings    Training[]
 
   @@map("users")
 }

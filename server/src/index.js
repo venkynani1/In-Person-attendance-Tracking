@@ -33,6 +33,7 @@ const upload = multer({
   }
 });
 let nominationTableReadyPromise = null;
+let trainingOwnershipReadyPromise = null;
 
 const allowedOrigins = [
   process.env.CLIENT_URL,
@@ -167,6 +168,83 @@ function isMissingNominationTableError(error) {
   return error instanceof Prisma.PrismaClientKnownRequestError &&
     error.code === 'P2010' &&
     error.meta?.code === '42P01';
+}
+
+function isMasterAdmin(user) {
+  return user?.role === 'MASTER_ADMIN';
+}
+
+function trainingVisibilityWhere(user) {
+  if (isMasterAdmin(user)) return {};
+  return { createdById: user.id };
+}
+
+function assertTrainingAccess(training, user) {
+  if (isMasterAdmin(user)) return;
+
+  if (training.createdById !== user.id) {
+    throw createHttpError(403, 'You do not have access to this training.');
+  }
+}
+
+async function ensureTrainingOwnershipColumn() {
+  if (!trainingOwnershipReadyPromise) {
+    trainingOwnershipReadyPromise = (async () => {
+      await prisma.$executeRawUnsafe(`
+        ALTER TABLE "Training" ADD COLUMN IF NOT EXISTS "createdById" UUID;
+      `);
+      await prisma.$executeRawUnsafe(`
+        CREATE INDEX IF NOT EXISTS "Training_createdById_idx" ON "Training"("createdById");
+      `);
+      await prisma.$executeRawUnsafe(`
+        DO $$
+        BEGIN
+          IF NOT EXISTS (
+            SELECT 1
+            FROM pg_constraint
+            WHERE conname = 'Training_createdById_fkey'
+          ) THEN
+            ALTER TABLE "Training"
+            ADD CONSTRAINT "Training_createdById_fkey"
+            FOREIGN KEY ("createdById") REFERENCES "users"("id")
+            ON DELETE RESTRICT ON UPDATE CASCADE;
+          END IF;
+        END $$;
+      `);
+    })().catch((error) => {
+      trainingOwnershipReadyPromise = null;
+      throw error;
+    });
+  }
+
+  return trainingOwnershipReadyPromise;
+}
+
+async function getTrainingOrThrow(id, user, options = {}) {
+  await ensureTrainingOwnershipColumn();
+
+  const queryOptions = options.select
+    ? { ...options, select: { ...options.select, createdById: true } }
+    : options;
+
+  const training = await prisma.training.findUnique({
+    where: { id },
+    ...queryOptions
+  });
+
+  if (!training) throw createHttpError(404, 'Training not found.');
+
+  assertTrainingAccess(training, user);
+  return training;
+}
+
+async function requireTrainingAccess(req, res, next) {
+  try {
+    req.training = await getTrainingOrThrow(req.params.id, req.user);
+    next();
+  } catch (error) {
+    next(error);
+  }
 }
 
 async function ensureNominationTable() {
@@ -488,6 +566,8 @@ app.patch('/api/admin/users/:id/reject', requireAuth, requireMasterAdmin, asyncH
 }));
 
 app.post('/api/trainings', requireAuth, asyncHandler(async (req, res) => {
+  await ensureTrainingOwnershipColumn();
+
   const {
     trainingName,
     trainerName,
@@ -520,6 +600,7 @@ app.post('/api/trainings', requireAuth, asyncHandler(async (req, res) => {
       description: sanitizeOptional(description),
       startDateTime: startsAt,
       endDateTime: endsAt,
+      createdById: req.user.id,
       token: await generateUniqueToken()
     },
     include: {
@@ -531,7 +612,10 @@ app.post('/api/trainings', requireAuth, asyncHandler(async (req, res) => {
 }));
 
 app.get('/api/trainings', requireAuth, asyncHandler(async (req, res) => {
+  await ensureTrainingOwnershipColumn();
+
   const trainings = await prisma.training.findMany({
+    where: trainingVisibilityWhere(req.user),
     orderBy: { createdAt: 'desc' },
     include: {
       _count: { select: { attendances: true } }
@@ -542,20 +626,17 @@ app.get('/api/trainings', requireAuth, asyncHandler(async (req, res) => {
 }));
 
 app.get('/api/trainings/:id', requireAuth, asyncHandler(async (req, res) => {
-  const training = await prisma.training.findUnique({
-    where: { id: req.params.id },
+  const training = await getTrainingOrThrow(req.params.id, req.user, {
     include: {
       _count: { select: { attendances: true } }
     }
   });
 
-  if (!training) throw createHttpError(404, 'Training not found.');
   res.json((await trainingResponses([training]))[0]);
 }));
 
 app.get('/api/trainings/:id/qr', requireAuth, asyncHandler(async (req, res) => {
-  const training = await prisma.training.findUnique({ where: { id: req.params.id } });
-  if (!training) throw createHttpError(404, 'Training not found.');
+  const training = await getTrainingOrThrow(req.params.id, req.user);
 
   const qrBuffer = await QRCode.toBuffer(buildAttendanceLink(training.token), {
     type: 'png',
@@ -570,8 +651,7 @@ app.get('/api/trainings/:id/qr', requireAuth, asyncHandler(async (req, res) => {
 }));
 
 app.get('/api/trainings/:id/attendance', requireAuth, asyncHandler(async (req, res) => {
-  const training = await prisma.training.findUnique({ where: { id: req.params.id } });
-  if (!training) throw createHttpError(404, 'Training not found.');
+  await getTrainingOrThrow(req.params.id, req.user);
 
   const attendances = await prisma.attendance.findMany({
     where: { trainingId: req.params.id },
@@ -586,10 +666,8 @@ app.get('/api/trainings/:id/attendance', requireAuth, asyncHandler(async (req, r
 }));
 
 app.get('/api/trainings/:id/nominations', requireAuth, asyncHandler(async (req, res) => {
+  await getTrainingOrThrow(req.params.id, req.user);
   await ensureNominationTable();
-
-  const training = await prisma.training.findUnique({ where: { id: req.params.id } });
-  if (!training) throw createHttpError(404, 'Training not found.');
 
   const nominations = await prisma.nomination.findMany({
     where: { trainingId: req.params.id },
@@ -606,11 +684,8 @@ app.get('/api/trainings/:id/nominations', requireAuth, asyncHandler(async (req, 
   res.json(nominations);
 }));
 
-app.post('/api/trainings/:id/nominations', requireAuth, upload.single('nominationsFile'), asyncHandler(async (req, res) => {
+app.post('/api/trainings/:id/nominations', requireAuth, requireTrainingAccess, upload.single('nominationsFile'), asyncHandler(async (req, res) => {
   await ensureNominationTable();
-
-  const training = await prisma.training.findUnique({ where: { id: req.params.id } });
-  if (!training) throw createHttpError(404, 'Training not found.');
 
   if (!req.file) {
     throw createHttpError(400, 'Please select a nominations Excel file.');
@@ -651,6 +726,7 @@ app.post('/api/trainings/:id/nominations', requireAuth, upload.single('nominatio
 }));
 
 app.get('/api/trainings/:id/export', requireAuth, asyncHandler(async (req, res) => {
+  await getTrainingOrThrow(req.params.id, req.user);
   await ensureNominationTable();
 
   const training = await prisma.training.findUnique({
@@ -697,14 +773,12 @@ app.get('/api/trainings/:id/export', requireAuth, asyncHandler(async (req, res) 
 }));
 
 app.patch('/api/trainings/:id/stop', requireAuth, asyncHandler(async (req, res) => {
-  const training = await prisma.training.findUnique({
-    where: { id: req.params.id },
+  const training = await getTrainingOrThrow(req.params.id, req.user, {
     include: {
       _count: { select: { attendances: true } }
     }
   });
 
-  if (!training) throw createHttpError(404, 'Training not found.');
   if (training.manuallyStopped) {
     res.json((await trainingResponses([training]))[0]);
     return;
@@ -729,6 +803,7 @@ app.patch('/api/trainings/:id/stop', requireAuth, asyncHandler(async (req, res) 
 }));
 
 app.delete('/api/trainings/:id', requireAuth, asyncHandler(async (req, res) => {
+  await getTrainingOrThrow(req.params.id, req.user);
   await prisma.training.delete({ where: { id: req.params.id } });
   res.status(204).send();
 }));
@@ -765,7 +840,15 @@ app.post('/api/attend/:token', asyncHandler(async (req, res) => {
     throw createHttpError(400, 'Employee ID and employee name are required.');
   }
 
-  const training = await prisma.training.findUnique({ where: { token: req.params.token } });
+  const training = await prisma.training.findUnique({
+    where: { token: req.params.token },
+    select: {
+      id: true,
+      startDateTime: true,
+      endDateTime: true,
+      manuallyStopped: true
+    }
+  });
   if (!training) throw createHttpError(404, 'Attendance link not found.');
 
   const status = getTrainingStatus(training);

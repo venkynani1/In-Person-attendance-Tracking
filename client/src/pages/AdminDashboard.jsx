@@ -107,6 +107,7 @@ function AdminDashboard() {
   const openCount = trainings.filter((training) => getSessionState(training, now).key === 'active').length;
   const totalAttendance = trainings.reduce((sum, training) => sum + (training._count?.attendances || 0), 0);
   const closedCount = trainings.filter((training) => getSessionState(training, now).key === 'closed').length;
+  const dashboardTitle = user?.role === 'MASTER_ADMIN' ? 'All Trainings' : 'My Trainings';
   const filteredTrainings = trainings.filter((training) => {
     const matchesSearch = training.trainingName.toLowerCase().includes(searchQuery.trim().toLowerCase());
     const matchesStatus = statusFilter === 'all' || getDashboardStatus(training, now) === statusFilter;
@@ -120,7 +121,7 @@ function AdminDashboard() {
         <div className="page-title-row dashboard-hero">
           <div>
             <p className="eyebrow">Admin</p>
-            <h1>Command Dashboard</h1>
+            <h1>{dashboardTitle}</h1>
             {user && <p className="page-subtitle account-line">Logged in as <strong>{user.username}</strong></p>}
             <p className="page-subtitle">Monitor active training sessions, attendance capture, and exports from one operational view.</p>
           </div>
