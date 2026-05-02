@@ -9,5 +9,12 @@ server/.env
 
 dist/
 client/dist/
+server/dist/
+build/
+coverage/
+tmp/
+uploads/
 
 *.log
+.vscode/
+.DS_Store

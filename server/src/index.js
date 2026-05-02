@@ -35,6 +35,7 @@ const upload = multer({
 let nominationTableReadyPromise = null;
 let trainingOwnershipReadyPromise = null;
 let passwordResetColumnsReadyPromise = null;
+let attendanceIpAddressReadyPromise = null;
 
 const allowedOrigins = [
   'https://in-person-attendance-tracking.vercel.app',
@@ -178,6 +179,22 @@ function isMissingNominationTableError(error) {
     error.meta?.code === '42P01';
 }
 
+function getRequestIp(req) {
+  const forwardedFor = Array.isArray(req.headers['x-forwarded-for'])
+    ? req.headers['x-forwarded-for'].join(',')
+    : req.headers['x-forwarded-for'];
+  const rawIp =
+    (forwardedFor || '')
+      .split(',')
+      .map((ip) => ip.trim())
+      .filter(Boolean)[0] ||
+    req.socket.remoteAddress ||
+    'unknown';
+
+  const ipAddress = rawIp.replace('::ffff:', '');
+  return ipAddress;
+}
+
 function isMasterAdmin(user) {
   return user?.role === 'MASTER_ADMIN';
 }
@@ -295,6 +312,21 @@ async function ensureNominationTable() {
   }
 
   return nominationTableReadyPromise;
+}
+
+async function ensureAttendanceIpAddressColumn() {
+  if (!attendanceIpAddressReadyPromise) {
+    attendanceIpAddressReadyPromise = (async () => {
+      await prisma.$executeRawUnsafe(`
+        ALTER TABLE "Attendance" ADD COLUMN IF NOT EXISTS "ipAddress" TEXT;
+      `);
+    })().catch((error) => {
+      attendanceIpAddressReadyPromise = null;
+      throw error;
+    });
+  }
+
+  return attendanceIpAddressReadyPromise;
 }
 
 async function getNominationCounts(trainingIds) {
@@ -967,10 +999,19 @@ app.get('/api/attend/:token/status', asyncHandler(async (req, res) => {
 }));
 
 app.post('/api/attend/:token', asyncHandler(async (req, res) => {
-  const { employeeId, employeeName } = req.body;
+  await ensureAttendanceIpAddressColumn();
 
-  if (!employeeId?.trim() || !employeeName?.trim()) {
+  const { employeeId, employeeName } = req.body;
+  const normalizedEmployeeId = String(employeeId || '').trim();
+  const normalizedEmployeeName = String(employeeName || '').trim();
+  const ipAddress = getRequestIp(req);
+
+  if (!normalizedEmployeeId || !normalizedEmployeeName) {
     throw createHttpError(400, 'Employee ID and employee name are required.');
+  }
+
+  if (!/^[0-9]{10}$/.test(normalizedEmployeeId)) {
+    throw createHttpError(400, 'Invalid Employee ID format');
   }
 
   const training = await prisma.training.findUnique({
@@ -989,11 +1030,28 @@ app.post('/api/attend/:token', asyncHandler(async (req, res) => {
   if (status === 'closed') throw createHttpError(403, 'Attendance closed by admin.');
   if (status === 'expired') throw createHttpError(403, 'Attendance has closed for this training.');
 
+  if (ipAddress) {
+    const existingAttendanceFromIp = await prisma.attendance.findFirst({
+      where: {
+        trainingId: training.id,
+        ipAddress
+      },
+      select: {
+        id: true
+      }
+    });
+
+    if (existingAttendanceFromIp) {
+      throw createHttpError(400, 'Attendance already submitted from this device');
+    }
+  }
+
   const attendance = await prisma.attendance.create({
     data: {
       trainingId: training.id,
-      employeeId: employeeId.trim(),
-      employeeName: employeeName.trim()
+      employeeId: normalizedEmployeeId,
+      employeeName: normalizedEmployeeName,
+      ipAddress
     },
     select: {
       employeeId: true,
@@ -1024,7 +1082,7 @@ app.use((error, req, res, next) => {
     const target = Array.isArray(error.meta?.target) ? error.meta.target : [];
     const message = target.includes('username')
       ? 'Username already exists.'
-      : 'You have already marked attendance for this training.';
+      : 'Attendance already submitted';
     res.status(409).json({ error: message });
     return;
   }

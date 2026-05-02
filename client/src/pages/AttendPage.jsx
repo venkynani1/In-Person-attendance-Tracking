@@ -114,7 +114,11 @@ function AttendPage() {
       await loadStatus();
     } catch (err) {
       const message = getApiError(err, 'Could not submit attendance.');
-      setError(message.includes('already') ? 'Attendance already submitted' : message);
+      setError(
+        message === 'Attendance already submitted from this device'
+          ? 'You have already submitted attendance for this session.'
+          : message.includes('already') ? 'Attendance already submitted' : message
+      );
       await loadStatus();
     } finally {
       setSubmitting(false);

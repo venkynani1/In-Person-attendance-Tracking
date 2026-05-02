@@ -32,6 +32,7 @@ model Attendance {
   training     Training @relation(fields: [trainingId], references: [id], onDelete: Cascade)
   employeeId   String
   employeeName String
+  ipAddress    String?
   submittedAt  DateTime @default(now())
 
   @@unique([trainingId, employeeId])

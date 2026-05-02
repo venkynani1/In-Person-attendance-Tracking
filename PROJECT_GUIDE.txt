@@ -1,0 +1,719 @@
+PROJECT GUIDE
+In-Person Attendance Tracking
+
+This file is safe to commit to GitHub. It intentionally contains no secrets,
+real environment values, database URLs, JWT secrets, API keys, or passwords.
+
+
+1. PROJECT OVERVIEW
+
+This project is a full-stack in-person training attendance application.
+Admins create training sessions, display or share a QR attendance link, collect
+participant attendance, optionally upload nomination lists, and export final
+attendance reports.
+
+Main users:
+
+- MASTER_ADMIN:
+  Can see all trainings and manage admin user approvals.
+
+- ADMIN:
+  Can create and manage only the trainings they created.
+
+- Participants:
+  Do not log in. They scan/open a public attendance link and submit Employee ID
+  and Employee Name while the attendance window is active.
+
+Core flow:
+
+1. Admin signs up or logs in.
+2. MASTER_ADMIN approves pending admin users.
+3. Admin creates a training with name, trainer, location, time window, and
+   optional description.
+4. App generates a QR/public attendance link for the training.
+5. Participants scan the QR link and submit attendance.
+6. Admin can upload nominations for expected attendees.
+7. Admin can view live attendance, stop attendance manually, export Excel, or
+   delete a training.
+
+
+2. FOLDER STRUCTURE
+
+client/
+Frontend React application built with Vite. Contains all UI pages, reusable
+components, API client code, CSS, and frontend deployment config.
+
+server/
+Backend Node.js/Express API. Contains routes, auth, Prisma access, QR
+generation, Excel import/export, and backend deployment config.
+
+server/prisma/
+Prisma schema, migrations, and seed script. Edit this area when changing the
+database model or creating seed data. Do not put environment values here.
+
+client/src/pages/
+Top-level routed React pages. Most user-facing screens live here.
+
+client/src/components/
+Reusable React UI pieces such as header, protected route wrapper, and backend
+wake/status banner.
+
+client/src/services/
+Frontend API client and request helpers. This is where browser requests to the
+backend are centralized.
+
+client/src/utils/
+Shared frontend utility functions. Session status and time-window display logic
+live here.
+
+
+3. FRONTEND PAGES EXPLANATION
+
+LoginPage.jsx
+
+Purpose:
+Shows the login screen for admins and master admins.
+
+Main features:
+- Username/password login
+- Redirects already-authenticated users
+- Links to signup and forgot-password flows
+
+Connected APIs:
+- POST /api/auth/login
+- GET /api/auth/me indirectly through auth context after login
+
+What to edit for UI changes:
+- Edit JSX and classes in client/src/pages/LoginPage.jsx
+- Edit shared styles in client/src/index.css
+
+What to edit for behavior changes:
+- Login request behavior is in client/src/services/api.js
+- Authentication state behavior is in client/src/context/AuthContext.jsx
+
+
+SignupPage.jsx
+
+Purpose:
+Allows a new admin user to request access.
+
+Main features:
+- Signup form
+- Password confirmation
+- Pending approval messaging
+
+Connected APIs:
+- POST /api/auth/signup
+
+What to edit for UI changes:
+- Edit client/src/pages/SignupPage.jsx
+- Edit related form styles in client/src/index.css
+
+What to edit for behavior changes:
+- API request helper in client/src/services/api.js
+- Signup backend route in server/src/index.js
+
+
+ForgotPassword.jsx
+
+Purpose:
+Starts the password reset flow for an approved user.
+
+Main features:
+- Username entry
+- Demo-mode reset token/link display
+
+Connected APIs:
+- POST /api/auth/forgot-password
+
+What to edit for UI changes:
+- Edit client/src/pages/ForgotPassword.jsx
+
+What to edit for behavior changes:
+- Frontend call in client/src/services/api.js
+- Backend forgot-password route in server/src/index.js
+- For real production, replace demo token display with email delivery.
+
+
+ResetPassword.jsx
+
+Purpose:
+Completes password reset using a reset token.
+
+Main features:
+- Reads token from URL query string
+- New password and confirmation form
+- Redirects after successful reset
+
+Connected APIs:
+- POST /api/auth/reset-password
+
+What to edit for UI changes:
+- Edit client/src/pages/ResetPassword.jsx
+
+What to edit for behavior changes:
+- Frontend reset request in client/src/services/api.js
+- Backend reset-password route in server/src/index.js
+
+
+AdminDashboard.jsx
+
+Purpose:
+Main logged-in admin dashboard for listing and managing trainings.
+
+Main features:
+- Training list
+- Search/filter controls
+- Attendance totals
+- Export shortcut
+- Stop/delete training actions
+- MASTER_ADMIN user approval area through MasterAdminUsers
+
+Connected APIs:
+- GET /api/trainings
+- GET /api/trainings/:id/export
+- PATCH /api/trainings/:id/stop
+- DELETE /api/trainings/:id
+- Admin user APIs through MasterAdminUsers for master admins
+
+What to edit for UI changes:
+- Edit client/src/pages/AdminDashboard.jsx
+- Edit dashboard/card/table styles in client/src/index.css
+
+What to edit for behavior changes:
+- API functions in client/src/services/api.js
+- Training routes in server/src/index.js
+- Permission logic in server/src/index.js
+
+
+TrainingDetails.jsx
+
+Purpose:
+Detailed management page for one training.
+
+Main features:
+- Training summary
+- Smart attendance summary
+- Attendance link copy/open
+- QR display link
+- Nomination upload
+- Attendance and nomination tables
+- Export, stop, and delete actions
+
+Connected APIs:
+- GET /api/trainings/:id
+- GET /api/trainings/:id/attendance
+- GET /api/trainings/:id/nominations
+- POST /api/trainings/:id/nominations
+- GET /api/trainings/:id/export
+- PATCH /api/trainings/:id/stop
+- DELETE /api/trainings/:id
+
+What to edit for UI changes:
+- Edit client/src/pages/TrainingDetails.jsx
+- Edit table, panel, upload, and action styles in client/src/index.css
+
+What to edit for behavior changes:
+- API functions in client/src/services/api.js
+- Backend training, nomination, export, stop, and delete routes in server/src/index.js
+- Excel generation in server/src/utils/excelExport.js
+
+
+AttendPage.jsx
+
+Purpose:
+Public participant attendance form opened from QR/link.
+
+Main features:
+- Loads public training status
+- Shows open/upcoming/closed state
+- Collects Employee ID and Employee Name
+- Validates Employee ID as exactly 10 digits
+- Uses localStorage as a frontend repeat-submission lock
+- Shows friendly duplicate-submission messages
+
+Connected APIs:
+- GET /api/attend/:token/status
+- POST /api/attend/:token
+- GET /api/health before submit
+
+What to edit for UI changes:
+- Edit client/src/pages/AttendPage.jsx
+- Edit public form styles in client/src/index.css
+
+What to edit for behavior changes:
+- Frontend validation and messages in client/src/pages/AttendPage.jsx
+- Public attendance backend route in server/src/index.js
+- Shared session status helpers in client/src/utils/session.js
+
+
+QrDisplay.jsx
+
+Purpose:
+Display-friendly QR page for one training.
+
+Main features:
+- Shows QR code for attendance link
+- Shows live attendance count/list
+- Shows session state and training information
+
+Connected APIs:
+- GET /api/trainings/:id
+- GET /api/trainings/:id/attendance
+- GET /api/trainings/:id/qr
+
+What to edit for UI changes:
+- Edit client/src/pages/QrDisplay.jsx
+- Edit QR/display styles in client/src/index.css
+
+What to edit for behavior changes:
+- API functions in client/src/services/api.js
+- QR route in server/src/index.js
+
+
+MasterAdminUsers.jsx
+
+Purpose:
+MASTER_ADMIN-only user management panel embedded in the dashboard.
+
+Main features:
+- Lists pending signup requests
+- Approves or rejects admin users
+- Lists admin directory
+
+Connected APIs:
+- GET /api/admin/users
+- GET /api/admin/pending-users
+- PATCH /api/admin/users/:id/approve
+- PATCH /api/admin/users/:id/reject
+
+What to edit for UI changes:
+- Edit client/src/pages/MasterAdminUsers.jsx
+- Edit admin user styles in client/src/index.css
+
+What to edit for behavior changes:
+- Admin API helpers in client/src/services/api.js
+- Admin routes and role checks in server/src/index.js
+
+
+4. FRONTEND COMPONENTS
+
+Header.jsx
+
+Purpose:
+Shared logged-in navigation header.
+
+Main features:
+- Brand/title area
+- Navigation links
+- User role/status display
+- Logout button
+
+Edit this file to change the logged-in navigation layout or labels.
+
+
+ProtectedRoute.jsx
+
+Purpose:
+Guards routes that require an authenticated user.
+
+Main features:
+- Reads auth state
+- Redirects unauthenticated users to login
+- Shows protected routes only after auth is ready
+
+Edit this file to change route protection behavior.
+
+
+BackendWakeBanner.jsx
+
+Purpose:
+Shows backend connection/wake-up state for hosted environments where the backend
+may sleep.
+
+Main features:
+- Subscribes to backend status events from services/api.js
+- Displays retry/error/wake messaging
+
+Edit this file for frontend status banner UI. Edit services/api.js for the
+underlying retry/status behavior.
+
+
+5. SERVICES AND UTILITIES
+
+client/src/services/api.js
+
+Purpose:
+Central frontend API layer.
+
+Main responsibilities:
+- Defines API_BASE_URL
+- Creates Axios instance
+- Adds Authorization header when a token exists
+- Handles 401 responses and redirects to login
+- Provides retry behavior for backend wake-up
+- Exports grouped API helpers: authAPI, trainingAPI, attendAPI, adminAPI
+
+API base URL:
+- Uses VITE_API_BASE_URL when provided.
+- Falls back to a local backend URL for development.
+- Do not hard-code production secrets here.
+
+Token handling:
+- getStoredToken, setStoredToken, and clearStoredToken use localStorage.
+- Auth token key is attendanceAuthToken.
+
+
+client/src/utils/session.js
+
+Purpose:
+Shared frontend logic for training session state and display.
+
+Main responsibilities:
+- Computes whether a training is upcoming, active, stopped, or expired
+- Produces countdown/status messages
+- Produces smart summary text for dashboards/details
+
+Edit this file when changing attendance-window status logic or labels.
+
+
+client/src/context/AuthContext.jsx
+
+Purpose:
+Provides auth state to the React app.
+
+Main responsibilities:
+- Loads the current user
+- Handles login/logout
+- Stores/removes auth token
+- Reacts to auth-expired events
+
+Edit this file when changing frontend authentication behavior.
+
+
+6. BACKEND EXPLANATION
+
+server/src/index.js is the main backend file. It initializes Express, Prisma,
+CORS, JSON parsing, auth middleware, route handlers, and global error handling.
+
+Auth routes:
+- POST /api/auth/signup
+- POST /api/auth/login
+- GET /api/auth/me
+- POST /api/auth/forgot-password
+- POST /api/auth/reset-password
+
+Training routes:
+- POST /api/trainings
+- GET /api/trainings
+- GET /api/trainings/:id
+- GET /api/trainings/:id/qr
+- PATCH /api/trainings/:id/stop
+- DELETE /api/trainings/:id
+
+Attendance routes:
+- GET /api/attend/:token/status
+- POST /api/attend/:token
+- GET /api/trainings/:id/attendance
+
+Nomination routes:
+- GET /api/trainings/:id/nominations
+- POST /api/trainings/:id/nominations
+
+Export routes:
+- GET /api/trainings/:id/export
+
+Ownership checks:
+- MASTER_ADMIN can access all trainings.
+- ADMIN can access only trainings where createdById matches their user ID.
+- getTrainingOrThrow and requireTrainingAccess enforce ownership for protected
+  training operations.
+
+CORS:
+- Configured near the top of server/src/index.js.
+- Allows configured client URL, localhost dev URLs, and Vercel app origins.
+
+Error handling:
+- Global 404 handler returns Route not found.
+- Global error handler converts known Multer and Prisma errors into friendly
+  JSON responses.
+- Unknown server errors return a generic message and are logged server-side.
+
+Request ID logging:
+- Dedicated request-ID middleware is not currently implemented.
+- Current backend logging is limited to startup logging and server-side error
+  logging.
+- If request IDs are needed later, add middleware near the Express setup in
+  server/src/index.js and include the ID in response headers and controlled
+  server logs.
+
+
+7. DATABASE / PRISMA MODELS
+
+User
+
+Represents an admin or master admin user.
+
+Important fields:
+- id
+- username
+- passwordHash
+- role
+- status
+- resetToken
+- resetTokenExpires
+- createdAt
+- updatedAt
+
+Roles:
+- MASTER_ADMIN
+- ADMIN
+
+Statuses:
+- PENDING
+- APPROVED
+- REJECTED
+
+
+Training
+
+Represents a training session.
+
+Important fields:
+- id
+- trainingName
+- trainerName
+- location
+- description
+- startDateTime
+- endDateTime
+- token
+- manuallyStopped
+- stoppedAt
+- createdById
+- attendances
+- nominations
+
+Rules:
+- token is unique and powers the public attendance link.
+- createdById controls admin ownership.
+
+
+Attendance
+
+Represents one attendance submission.
+
+Important fields:
+- id
+- trainingId
+- employeeId
+- employeeName
+- ipAddress
+- submittedAt
+
+Rules:
+- trainingId + employeeId is unique.
+- Employee ID must be exactly 10 digits.
+- The public attendance route also checks trainingId + ipAddress as a
+  best-effort one-submission-per-device/IP control.
+
+
+Nomination
+
+Represents one nominated/expected attendee for a training.
+
+Important fields:
+- id
+- trainingId
+- employeeId
+- employeeName
+- createdAt
+- updatedAt
+
+Rules:
+- trainingId + employeeId is unique.
+- Used to compare expected vs present attendees in details/export flows.
+
+
+Important application rules:
+
+- MASTER_ADMIN sees all trainings.
+- ADMIN sees only trainings they created.
+- Public attendance route does not require login.
+- Employee ID must be exactly 10 digits.
+- One submission per training per employee ID is enforced by Prisma/database
+  uniqueness.
+- One submission per training per IP/device is best effort and not foolproof.
+  VPNs, shared networks, mobile carriers, and proxy behavior can affect it.
+
+
+8. ENVIRONMENT VARIABLES
+
+Use placeholders only. Do not commit real values.
+
+Backend:
+
+- DATABASE_URL=<database connection string>
+- JWT_SECRET=<long random secret>
+- CLIENT_URL=<frontend origin>
+- PUBLIC_BASE_URL=<public frontend base URL used for attendance links>
+- SEED_DEFAULT_PASSWORD=<optional default seed password if seed script is later updated to read it>
+
+Frontend:
+
+- VITE_API_BASE_URL=<backend API base URL>
+
+Notes:
+- The current seed script contains demo seed users in code. Do not expose real
+  production passwords in code or documentation.
+- Never commit .env files.
+
+
+9. DEPLOYMENT NOTES
+
+Frontend on Vercel:
+
+- Root/build directory: client
+- Install command: npm install
+- Build command: npm run build
+- Output directory: dist
+- Set VITE_API_BASE_URL to the deployed backend API URL.
+
+Backend on Render:
+
+- Root/build directory: server
+- Install command: npm install
+- Build command: npm run build
+- Start command: npm start
+- Set DATABASE_URL, JWT_SECRET, CLIENT_URL, and PUBLIC_BASE_URL in Render
+  environment variables.
+- Run Prisma migrations during deployment using the configured Prisma deploy
+  script when appropriate.
+
+Database on Supabase:
+
+- Use Supabase Postgres as the DATABASE_URL target.
+- Apply Prisma migrations before relying on new schema fields.
+- Keep database credentials only in environment variables.
+
+Do not commit:
+- .env
+- *.env
+- node_modules
+- dist/build artifacts
+- logs
+
+
+10. COMMON CHANGES GUIDE
+
+How to change UI colors:
+
+- Edit client/src/index.css.
+- Look for root variables and shared class styles.
+- Keep contrast readable for forms, alerts, tables, and buttons.
+
+
+How to change dashboard cards:
+
+- Edit client/src/pages/AdminDashboard.jsx for dashboard card content.
+- Edit client/src/index.css for layout, spacing, and visual styling.
+- Backend counts come from GET /api/trainings and training response objects.
+
+
+How to change attendance form fields:
+
+- Edit client/src/pages/AttendPage.jsx for participant form UI and frontend
+  validation.
+- Edit POST /api/attend/:token in server/src/index.js for backend validation
+  and stored data.
+- Update server/prisma/schema.prisma and add a migration if new fields must be
+  stored in the database.
+
+
+How to change Excel export columns:
+
+- Edit server/src/utils/excelExport.js for workbook columns and formatting.
+- Edit buildExportRows in server/src/index.js if the exported data shape needs
+  to change before workbook generation.
+
+
+How to change nomination upload logic:
+
+- Edit parseNominationsWorkbook and related nomination routes in
+  server/src/index.js.
+- Edit client/src/pages/TrainingDetails.jsx for upload UI and messages.
+- Update expected Excel column aliases in server/src/index.js if business names
+  change.
+
+
+How to change role permissions:
+
+- Edit isMasterAdmin, trainingVisibilityWhere, assertTrainingAccess, and
+  requireMasterAdmin/requireApprovedUser style middleware in server/src/index.js.
+- Edit frontend conditional UI in AdminDashboard.jsx, MasterAdminUsers.jsx, and
+  Header.jsx when role-specific controls change.
+
+
+How to add a new page:
+
+1. Create a new file in client/src/pages/.
+2. Add a route in client/src/App.jsx.
+3. Add navigation in Header.jsx if it is a logged-in page.
+4. Add API helpers in client/src/services/api.js if the page calls the backend.
+5. Add backend routes in server/src/index.js if new API behavior is needed.
+
+
+How to update API URL:
+
+- For frontend deployment, set VITE_API_BASE_URL in the hosting provider.
+- For local development, use a local frontend .env file that is not committed.
+- API fallback is defined in client/src/services/api.js.
+
+
+How to reset seed users:
+
+- Review server/prisma/seed.js.
+- Do not commit real production passwords.
+- For production, prefer environment-driven seed passwords or manual admin
+  creation with secure credentials.
+- Run the Prisma seed command only against the intended database.
+
+
+11. SECURITY NOTES
+
+- Do not expose passwords in code, docs, logs, screenshots, or commits.
+- Do not commit .env or environment-specific config values.
+- Reset all demo/default passwords before any real production use.
+- Password reset token shown in the UI is demo-mode behavior.
+- Production should send password reset links by email and avoid displaying raw
+  reset tokens on screen.
+- Keep JWT_SECRET long, random, and private.
+- Keep DATABASE_URL private.
+- Public attendance links do not require login by design, so keep validation and
+  duplicate checks on the backend.
+- The IP/device duplicate block is best effort only and should not be treated as
+  strong identity verification.
+
+
+12. FINAL TESTING CHECKLIST
+
+Before release, test:
+
+- Login as approved admin.
+- Signup as new admin.
+- MASTER_ADMIN approval/rejection of pending user.
+- Forgot-password flow.
+- Reset-password flow.
+- Create training.
+- Open QR display page.
+- Submit public QR attendance.
+- Duplicate blocking by same Employee ID.
+- Duplicate blocking by same IP/device best effort.
+- Upload nominations.
+- View nominated vs present/absent state.
+- Export Excel report.
+- Manual stop attendance.
+- Delete training.
+- Confirm ADMIN users cannot see or modify other admins' trainings.
+- Confirm MASTER_ADMIN can see all trainings.
+- Confirm .env files, logs, node_modules, and build artifacts are not committed.
