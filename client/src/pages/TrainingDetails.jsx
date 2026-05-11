@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import { CalendarClock, Check, CircleStop, Copy, Download, ExternalLink, Link2, MapPin, MonitorUp, RefreshCw, Sparkles, Timer, Trash2, Upload, UserX, UsersRound } from 'lucide-react';
 import Header from '../components/Header.jsx';
 import { getApiError, trainingAPI } from '../services/api.js';
+import { downloadQrAsJpg } from '../utils/qrDownload.js';
 import { formatDateTime, getCountdownMessage, getSessionState, getSmartSummaryItems } from '../utils/session.js';
 
 function TrainingDetails() {
@@ -25,6 +26,8 @@ function TrainingDetails() {
   const [showStopConfirm, setShowStopConfirm] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [qrSrc, setQrSrc] = useState('');
+  const [qrDownloadError, setQrDownloadError] = useState('');
+  const [downloadingQr, setDownloadingQr] = useState(false);
   const [now, setNow] = useState(() => new Date());
 
   async function loadDetails(options = {}) {
@@ -122,6 +125,21 @@ function TrainingDetails() {
       setError(getApiError(err, 'Failed to export attendance.'));
     } finally {
       setExporting(false);
+    }
+  }
+
+  async function handleDownloadQr() {
+    try {
+      setDownloadingQr(true);
+      setQrDownloadError('');
+      await downloadQrAsJpg({
+        qrSrc,
+        trainingName: training.trainingName
+      });
+    } catch (err) {
+      setQrDownloadError(err.message || 'Failed to download QR code.');
+    } finally {
+      setDownloadingQr(false);
     }
   }
 
@@ -376,6 +394,16 @@ function TrainingDetails() {
                     <div className="spinner" />
                   </div>
                 )}
+                <button
+                  className="button button-secondary compact qr-panel-download"
+                  type="button"
+                  onClick={handleDownloadQr}
+                  disabled={!qrSrc || downloadingQr}
+                >
+                  <Download size={18} aria-hidden="true" />
+                  {downloadingQr ? 'Preparing JPG...' : 'Download QR as JPG'}
+                </button>
+                {qrDownloadError && <div className="alert error qr-download-inline">{qrDownloadError}</div>}
               </div>
             </section>
 

@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { ArrowLeft, Clock, QrCode, UsersRound } from 'lucide-react';
+import { ArrowLeft, Clock, Download, QrCode, UsersRound } from 'lucide-react';
 import { getApiError, trainingAPI } from '../services/api.js';
+import { downloadQrAsJpg } from '../utils/qrDownload.js';
 import { formatDateTime, getCountdownMessage, getSessionState } from '../utils/session.js';
 
 function QrDisplay() {
@@ -11,6 +12,8 @@ function QrDisplay() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [qrSrc, setQrSrc] = useState('');
+  const [qrDownloadError, setQrDownloadError] = useState('');
+  const [downloadingQr, setDownloadingQr] = useState(false);
   const [now, setNow] = useState(() => new Date());
 
   async function loadDisplay(options = {}) {
@@ -72,6 +75,21 @@ function QrDisplay() {
 
   const sessionState = training ? getSessionState(training, now) : null;
 
+  async function handleDownloadQr() {
+    try {
+      setDownloadingQr(true);
+      setQrDownloadError('');
+      await downloadQrAsJpg({
+        qrSrc,
+        trainingName: training.trainingName
+      });
+    } catch (err) {
+      setQrDownloadError(err.message || 'Failed to download QR code.');
+    } finally {
+      setDownloadingQr(false);
+    }
+  }
+
   return (
     <main className="qr-display-page">
       <Link className="qr-back-link" to={`/training/${id}`}>
@@ -121,6 +139,16 @@ function QrDisplay() {
               <QrCode size={18} aria-hidden="true" />
               Scan with your phone camera
             </div>
+            <button
+              className="button button-secondary compact qr-download-button"
+              type="button"
+              onClick={handleDownloadQr}
+              disabled={!qrSrc || downloadingQr}
+            >
+              <Download size={18} aria-hidden="true" />
+              {downloadingQr ? 'Preparing JPG...' : 'Download QR as JPG'}
+            </button>
+            {qrDownloadError && <div className="qr-download-error">{qrDownloadError}</div>}
           </div>
         </section>
       ) : (
