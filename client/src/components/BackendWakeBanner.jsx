@@ -12,7 +12,7 @@ function BackendWakeBanner() {
       .catch(() => {
         setStatus({
           state: 'error',
-          message: 'The backend is not responding yet. Render Free may still be waking up.'
+          message: 'Loading...'
         });
       });
 

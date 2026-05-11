@@ -37,6 +37,7 @@ let trainingOwnershipReadyPromise = null;
 let passwordResetColumnsReadyPromise = null;
 let attendanceIpAddressReadyPromise = null;
 let attendanceOpenedAtReadyPromise = null;
+let trainingSessionsReadyPromise = null;
 
 const allowedOrigins = [
   'https://in-person-attendance-tracking.vercel.app',
@@ -332,9 +333,136 @@ async function ensureAttendanceOpenedAtColumn() {
   return attendanceOpenedAtReadyPromise;
 }
 
+async function ensureTrainingSessionsSchema() {
+  if (!trainingSessionsReadyPromise) {
+    trainingSessionsReadyPromise = (async () => {
+      await prisma.$executeRawUnsafe('CREATE EXTENSION IF NOT EXISTS "pgcrypto";');
+      await prisma.$executeRawUnsafe(`
+        ALTER TABLE "Training" ADD COLUMN IF NOT EXISTS "trainingType" TEXT NOT NULL DEFAULT 'SINGLE';
+      `);
+      await prisma.$executeRawUnsafe(`
+        ALTER TABLE "Training" ADD COLUMN IF NOT EXISTS "numberOfDays" INTEGER;
+      `);
+      await prisma.$executeRawUnsafe(`
+        ALTER TABLE "Training" ALTER COLUMN "token" DROP NOT NULL;
+      `);
+      await prisma.$executeRawUnsafe(`
+        CREATE TABLE IF NOT EXISTS "TrainingSession" (
+          "id" UUID NOT NULL,
+          "trainingId" UUID NOT NULL,
+          "sessionDate" TIMESTAMP(3) NOT NULL,
+          "startDateTime" TIMESTAMP(3) NOT NULL,
+          "endDateTime" TIMESTAMP(3) NOT NULL,
+          "dayNumber" INTEGER NOT NULL,
+          "token" TEXT NOT NULL,
+          "attendanceOpenedAt" TIMESTAMP(3),
+          "manuallyStopped" BOOLEAN NOT NULL DEFAULT false,
+          "stoppedAt" TIMESTAMP(3),
+          "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          CONSTRAINT "TrainingSession_pkey" PRIMARY KEY ("id")
+        );
+      `);
+      await prisma.$executeRawUnsafe(`
+        CREATE UNIQUE INDEX IF NOT EXISTS "TrainingSession_token_key" ON "TrainingSession"("token");
+      `);
+      await prisma.$executeRawUnsafe(`
+        CREATE INDEX IF NOT EXISTS "TrainingSession_trainingId_idx" ON "TrainingSession"("trainingId");
+      `);
+      await prisma.$executeRawUnsafe(`
+        DO $$
+        BEGIN
+          IF NOT EXISTS (
+            SELECT 1
+            FROM pg_constraint
+            WHERE conname = 'TrainingSession_trainingId_fkey'
+          ) THEN
+            ALTER TABLE "TrainingSession"
+            ADD CONSTRAINT "TrainingSession_trainingId_fkey"
+            FOREIGN KEY ("trainingId") REFERENCES "Training"("id")
+            ON DELETE CASCADE ON UPDATE CASCADE;
+          END IF;
+        END $$;
+      `);
+      await prisma.$executeRawUnsafe(`
+        INSERT INTO "TrainingSession" (
+          "id",
+          "trainingId",
+          "sessionDate",
+          "startDateTime",
+          "endDateTime",
+          "dayNumber",
+          "token",
+          "attendanceOpenedAt",
+          "manuallyStopped",
+          "stoppedAt",
+          "createdAt",
+          "updatedAt"
+        )
+        SELECT
+          gen_random_uuid(),
+          t."id",
+          date_trunc('day', t."startDateTime"),
+          t."startDateTime",
+          t."endDateTime",
+          1,
+          COALESCE(t."token", encode(gen_random_bytes(32), 'hex')),
+          t."attendanceOpenedAt",
+          t."manuallyStopped",
+          t."stoppedAt",
+          CURRENT_TIMESTAMP,
+          CURRENT_TIMESTAMP
+        FROM "Training" t
+        WHERE NOT EXISTS (
+          SELECT 1 FROM "TrainingSession" s WHERE s."trainingId" = t."id"
+        );
+      `);
+      await prisma.$executeRawUnsafe(`
+        ALTER TABLE "Attendance" ADD COLUMN IF NOT EXISTS "sessionId" UUID;
+      `);
+      await prisma.$executeRawUnsafe(`
+        UPDATE "Attendance" a
+        SET "sessionId" = s."id"
+        FROM "TrainingSession" s
+        WHERE a."trainingId" = s."trainingId"
+          AND s."dayNumber" = 1
+          AND a."sessionId" IS NULL;
+      `);
+      await prisma.$executeRawUnsafe(`
+        DROP INDEX IF EXISTS "Attendance_trainingId_employeeId_key";
+      `);
+      await prisma.$executeRawUnsafe(`
+        CREATE UNIQUE INDEX IF NOT EXISTS "Attendance_trainingId_sessionId_employeeId_key"
+        ON "Attendance"("trainingId", "sessionId", "employeeId");
+      `);
+      await prisma.$executeRawUnsafe(`
+        DO $$
+        BEGIN
+          IF NOT EXISTS (
+            SELECT 1
+            FROM pg_constraint
+            WHERE conname = 'Attendance_sessionId_fkey'
+          ) THEN
+            ALTER TABLE "Attendance"
+            ADD CONSTRAINT "Attendance_sessionId_fkey"
+            FOREIGN KEY ("sessionId") REFERENCES "TrainingSession"("id")
+            ON DELETE CASCADE ON UPDATE CASCADE;
+          END IF;
+        END $$;
+      `);
+    })().catch((error) => {
+      trainingSessionsReadyPromise = null;
+      throw error;
+    });
+  }
+
+  return trainingSessionsReadyPromise;
+}
+
 async function getTrainingOrThrow(id, user, options = {}) {
   await ensureTrainingOwnershipColumn();
   await ensureAttendanceOpenedAtColumn();
+  await ensureTrainingSessionsSchema();
 
   const queryOptions = options.select
     ? { ...options, select: { ...options.select, createdById: true } }
@@ -638,6 +766,8 @@ function trainingResponse(training, nominatedCount = 0) {
 }
 
 async function generateUniqueToken() {
+  await ensureTrainingSessionsSchema();
+
   for (let attempt = 0; attempt < 5; attempt += 1) {
     const token = crypto.randomBytes(32).toString('hex');
     const [existingTraining, existingSession] = await Promise.all([
@@ -926,6 +1056,7 @@ app.patch('/api/admin/users/:id/reject', requireAuth, requireMasterAdmin, asyncH
 app.post('/api/trainings', requireAuth, asyncHandler(async (req, res) => {
   await ensureTrainingOwnershipColumn();
   await ensureAttendanceOpenedAtColumn();
+  await ensureTrainingSessionsSchema();
 
   const {
     trainingName,
@@ -1001,30 +1132,32 @@ app.post('/api/trainings', requireAuth, asyncHandler(async (req, res) => {
     numberOfDays
   });
 
-  const training = await prisma.training.create({
-    data: {
-      trainingName: trainingName.trim(),
-      trainerName: trainerName.trim(),
-      location: location.trim(),
-      description: sanitizeOptional(description),
-      startDateTime: startsAt,
-      endDateTime: endsAt,
-      trainingType: normalizedTrainingType,
-      numberOfDays: normalizedTrainingType === 'SERIES' ? Number(numberOfDays) : 1,
-      createdById: req.user.id,
-      token: sessionCreates[0].token,
-      sessions: {
-        create: sessionCreates
-      }
-    },
-    include: {
-      sessions: {
-        orderBy: { dayNumber: 'asc' },
-        include: { _count: { select: { attendances: true } } }
+  const training = await prisma.$transaction((tx) =>
+    tx.training.create({
+      data: {
+        trainingName: trainingName.trim(),
+        trainerName: trainerName.trim(),
+        location: location.trim(),
+        description: description?.trim() || null,
+        startDateTime: startsAt,
+        endDateTime: endsAt,
+        trainingType: normalizedTrainingType,
+        numberOfDays: normalizedTrainingType === 'SERIES' ? Number(numberOfDays) : 1,
+        createdById: req.user.id,
+        token: sessionCreates[0].token,
+        sessions: {
+          create: sessionCreates
+        }
       },
-      _count: { select: { attendances: true } }
-    }
-  });
+      include: {
+        sessions: {
+          orderBy: { dayNumber: 'asc' },
+          include: { _count: { select: { attendances: true } } }
+        },
+        _count: { select: { attendances: true } }
+      }
+    })
+  );
 
   res.status(201).json(trainingResponse(training));
 }));
@@ -1405,6 +1538,7 @@ app.delete('/api/trainings/:id', requireAuth, asyncHandler(async (req, res) => {
 
 app.get('/api/attend/:token/status', asyncHandler(async (req, res) => {
   await ensureAttendanceOpenedAtColumn();
+  await ensureTrainingSessionsSchema();
 
   const session = await prisma.trainingSession.findUnique({
     where: { token: req.params.token },
@@ -1444,6 +1578,7 @@ app.get('/api/attend/:token/status', asyncHandler(async (req, res) => {
 app.post('/api/attend/:token', asyncHandler(async (req, res) => {
   await ensureAttendanceIpAddressColumn();
   await ensureAttendanceOpenedAtColumn();
+  await ensureTrainingSessionsSchema();
 
   const { employeeId, employeeName } = req.body;
   const normalizedEmployeeId = String(employeeId || '').trim();
@@ -1540,7 +1675,12 @@ app.use((error, req, res, next) => {
   const message = status === 500 ? 'Something went wrong. Please try again.' : error.message;
 
   if (status === 500) {
-    console.error(error);
+    console.error('Unhandled server error', {
+      method: req.method,
+      path: req.originalUrl,
+      message: error.message,
+      stack: error.stack
+    });
   }
 
   res.status(status).json({ error: message });
