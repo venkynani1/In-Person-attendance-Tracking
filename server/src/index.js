@@ -1053,114 +1053,184 @@ app.patch('/api/admin/users/:id/reject', requireAuth, requireMasterAdmin, asyncH
   res.json(publicUser(user));
 }));
 
-app.post('/api/trainings', requireAuth, asyncHandler(async (req, res) => {
-  await ensureTrainingOwnershipColumn();
-  await ensureAttendanceOpenedAtColumn();
-  await ensureTrainingSessionsSchema();
+app.post('/api/trainings', requireAuth, async (req, res, next) => {
+  try {
+    console.log('CREATE TRAINING BODY:', JSON.stringify(req.body, null, 2));
 
-  const {
-    trainingName,
-    trainerName,
-    location,
-    description,
-    trainingType = 'SINGLE',
-    numberOfDays,
-    startDate,
-    dailyStartTime,
-    dailyEndTime,
-    startDateTime,
-    endDateTime
-  } = req.body;
-  const normalizedTrainingType = trainingType === 'SERIES' ? 'SERIES' : 'SINGLE';
+    await ensureTrainingOwnershipColumn();
+    await ensureAttendanceOpenedAtColumn();
+    await ensureTrainingSessionsSchema();
 
-  if (!trainingName?.trim() || !trainerName?.trim() || !location?.trim()) {
-    throw createHttpError(400, 'Training name, trainer, and location are required.');
-  }
+    const {
+      trainingName,
+      trainerName,
+      location,
+      description,
+      trainingType = 'SINGLE',
+      numberOfDays,
+      startDateTime,
+      endDateTime,
+      startDate,
+      dailyStartTime,
+      dailyEndTime
+    } = req.body;
 
-  if (normalizedTrainingType === 'SINGLE' && (!startDateTime || !endDateTime)) {
-    throw createHttpError(400, 'Training name, trainer, location, start time, and end time are required.');
-  }
+    const cleanTrainingName = String(trainingName || '').trim();
+    const cleanTrainerName = String(trainerName || '').trim();
+    const cleanLocation = String(location || '').trim();
+    const cleanDescription = description ? String(description).trim() : null;
+    const cleanTrainingType = trainingType === 'SERIES' ? 'SERIES' : 'SINGLE';
 
-  if (normalizedTrainingType === 'SERIES') {
-    if (!startDate || !dailyStartTime || !dailyEndTime || !numberOfDays) {
-      throw createHttpError(400, 'Start date, number of days, daily start time, and daily end time are required for series training.');
+    if (!cleanTrainingName || !cleanTrainerName || !cleanLocation) {
+      return res.status(400).json({
+        message: 'Training name, trainer name, and location are required.'
+      });
     }
 
-    if (!Number.isInteger(Number(numberOfDays)) || Number(numberOfDays) <= 1) {
-      throw createHttpError(400, 'Number of days must be greater than 1 for series training.');
+    function generateSessionToken() {
+      return crypto.randomBytes(24).toString('hex');
     }
-  }
 
-  let startsAt = new Date(startDateTime);
-  let endsAt = new Date(endDateTime);
-
-  if (normalizedTrainingType === 'SERIES') {
-    startsAt = combineDateAndTime(startDate, dailyStartTime);
-    const finalDate = new Date(`${startDate}T00:00:00`);
-    finalDate.setDate(finalDate.getDate() + Number(numberOfDays) - 1);
-    const finalDatePart = [
-      finalDate.getFullYear(),
-      String(finalDate.getMonth() + 1).padStart(2, '0'),
-      String(finalDate.getDate()).padStart(2, '0')
-    ].join('-');
-    endsAt = combineDateAndTime(finalDatePart, dailyEndTime);
-  }
-
-  if (!startsAt || !endsAt || Number.isNaN(startsAt.getTime()) || Number.isNaN(endsAt.getTime())) {
-    throw createHttpError(400, 'Start and end date/time must be valid dates.');
-  }
-
-  if (startsAt >= endsAt) {
-    throw createHttpError(400, 'End date/time must be after start date/time.');
-  }
-
-  if (normalizedTrainingType === 'SERIES') {
-    const firstDailyStart = combineDateAndTime(startDate, dailyStartTime);
-    const firstDailyEnd = combineDateAndTime(startDate, dailyEndTime);
-    if (!firstDailyStart || !firstDailyEnd || firstDailyStart >= firstDailyEnd) {
-      throw createHttpError(400, 'Daily end time must be after daily start time.');
+    function createValidationError(message) {
+      const error = new Error(message);
+      error.statusCode = 400;
+      return error;
     }
-  }
 
-  const sessionCreates = await buildSessionCreates({
-    trainingType: normalizedTrainingType,
-    startsAt,
-    endsAt,
-    startDate,
-    dailyStartTime,
-    dailyEndTime,
-    numberOfDays
-  });
-
-  const training = await prisma.$transaction((tx) =>
-    tx.training.create({
-      data: {
-        trainingName: trainingName.trim(),
-        trainerName: trainerName.trim(),
-        location: location.trim(),
-        description: description?.trim() || null,
-        startDateTime: startsAt,
-        endDateTime: endsAt,
-        trainingType: normalizedTrainingType,
-        numberOfDays: normalizedTrainingType === 'SERIES' ? Number(numberOfDays) : 1,
-        createdById: req.user.id,
-        token: sessionCreates[0].token,
-        sessions: {
-          create: sessionCreates
-        }
-      },
-      include: {
-        sessions: {
-          orderBy: { dayNumber: 'asc' },
-          include: { _count: { select: { attendances: true } } }
-        },
-        _count: { select: { attendances: true } }
+    function parseDate(value, fieldName) {
+      const date = new Date(value);
+      if (!value || Number.isNaN(date.getTime())) {
+        throw createValidationError(`${fieldName} is invalid.`);
       }
-    })
-  );
+      return date;
+    }
 
-  res.status(201).json(trainingResponse(training));
-}));
+    function combinePayloadDateAndTime(dateValue, timeValue, fieldName) {
+      if (!dateValue || !timeValue) {
+        throw createValidationError(`${fieldName} is required.`);
+      }
+
+      const date = new Date(`${dateValue}T${timeValue}:00`);
+      if (Number.isNaN(date.getTime())) {
+        throw createValidationError(`${fieldName} is invalid.`);
+      }
+
+      return date;
+    }
+
+    const result = await prisma.$transaction(async (tx) => {
+      if (cleanTrainingType === 'SINGLE') {
+        const start = parseDate(startDateTime, 'Start date/time');
+        const end = parseDate(endDateTime, 'End date/time');
+
+        if (end <= start) {
+          throw createValidationError('End date/time must be after start date/time.');
+        }
+
+        const sessionToken = generateSessionToken();
+
+        return tx.training.create({
+          data: {
+            trainingName: cleanTrainingName,
+            trainerName: cleanTrainerName,
+            location: cleanLocation,
+            description: cleanDescription || null,
+            startDateTime: start,
+            endDateTime: end,
+            trainingType: 'SINGLE',
+            numberOfDays: 1,
+            token: sessionToken,
+            createdById: req.user.id,
+            sessions: {
+              create: {
+                sessionDate: start,
+                startDateTime: start,
+                endDateTime: end,
+                dayNumber: 1,
+                token: sessionToken
+              }
+            }
+          },
+          include: {
+            sessions: {
+              orderBy: { dayNumber: 'asc' },
+              include: { _count: { select: { attendances: true } } }
+            },
+            _count: { select: { attendances: true } }
+          }
+        });
+      }
+
+      const days = Number(numberOfDays);
+
+      if (!Number.isInteger(days) || days <= 1) {
+        throw createValidationError('Number of days must be greater than 1 for series training.');
+      }
+
+      const firstStart = combinePayloadDateAndTime(startDate, dailyStartTime, 'Series start date/time');
+      const firstEnd = combinePayloadDateAndTime(startDate, dailyEndTime, 'Series end date/time');
+
+      if (firstEnd <= firstStart) {
+        throw createValidationError('Daily end time must be after daily start time.');
+      }
+
+      const sessionsToCreate = [];
+
+      for (let index = 0; index < days; index += 1) {
+        const sessionStart = new Date(firstStart);
+        sessionStart.setDate(firstStart.getDate() + index);
+
+        const sessionEnd = new Date(firstEnd);
+        sessionEnd.setDate(firstEnd.getDate() + index);
+
+        sessionsToCreate.push({
+          sessionDate: sessionStart,
+          startDateTime: sessionStart,
+          endDateTime: sessionEnd,
+          dayNumber: index + 1,
+          token: generateSessionToken()
+        });
+      }
+
+      const lastEnd = sessionsToCreate[sessionsToCreate.length - 1].endDateTime;
+
+      return tx.training.create({
+        data: {
+          trainingName: cleanTrainingName,
+          trainerName: cleanTrainerName,
+          location: cleanLocation,
+          description: cleanDescription || null,
+          startDateTime: firstStart,
+          endDateTime: lastEnd,
+          trainingType: 'SERIES',
+          numberOfDays: days,
+          token: null,
+          createdById: req.user.id,
+          sessions: {
+            create: sessionsToCreate
+          }
+        },
+        include: {
+          sessions: {
+            orderBy: { dayNumber: 'asc' },
+            include: { _count: { select: { attendances: true } } }
+          },
+          _count: { select: { attendances: true } }
+        }
+      });
+    });
+
+    return res.status(201).json(trainingResponse(result));
+  } catch (error) {
+    console.error('CREATE TRAINING ERROR:', error);
+
+    if (error.statusCode === 400) {
+      return res.status(400).json({ message: error.message });
+    }
+
+    return next(error);
+  }
+});
 
 app.get('/api/trainings', requireAuth, asyncHandler(async (req, res) => {
   await ensureTrainingOwnershipColumn();
