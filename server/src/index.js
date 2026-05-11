@@ -1536,10 +1536,6 @@ async function stopTrainingSessionAttendance(req, res) {
     return;
   }
 
-  if (getSessionStatus(session) !== 'open') {
-    throw createHttpError(400, 'Only active sessions can be stopped.');
-  }
-
   const stoppedSession = await prisma.trainingSession.update({
     where: { id: session.id },
     data: {
