@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import { CalendarClock, Check, CircleStop, Copy, Download, ExternalLink, Link2, MapPin, MonitorUp, RefreshCw, Sparkles, Timer, Trash2, Upload, UserX, UsersRound } from 'lucide-react';
 import Header from '../components/Header.jsx';
 import { getApiError, trainingAPI } from '../services/api.js';
+import { buildAttendanceReportFileName } from '../utils/exportFileName.js';
 import { downloadQrAsJpg } from '../utils/qrDownload.js';
 import { formatDateTime, getCountdownMessage, getSessionState, getSmartSummaryItems } from '../utils/session.js';
 
@@ -116,7 +117,7 @@ function TrainingDetails() {
       const url = window.URL.createObjectURL(new Blob([response.data]));
       const link = document.createElement('a');
       link.href = url;
-      link.setAttribute('download', `attendance-${training.trainingName}.xlsx`);
+      link.setAttribute('download', buildAttendanceReportFileName(training));
       document.body.appendChild(link);
       link.click();
       link.remove();

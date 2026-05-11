@@ -4,6 +4,7 @@ import { CalendarClock, CircleStop, Download, Eye, Filter, MapPin, MonitorUp, Pl
 import Header from '../components/Header.jsx';
 import { useAuth } from '../context/AuthContext.jsx';
 import { getApiError, trainingAPI } from '../services/api.js';
+import { buildAttendanceReportFileName } from '../utils/exportFileName.js';
 import { formatDateTime, getSessionState } from '../utils/session.js';
 import MasterAdminUsers from './MasterAdminUsers.jsx';
 
@@ -62,7 +63,7 @@ function AdminDashboard() {
       const url = window.URL.createObjectURL(new Blob([response.data]));
       const link = document.createElement('a');
       link.href = url;
-      link.setAttribute('download', `attendance-${training.trainingName}.xlsx`);
+      link.setAttribute('download', buildAttendanceReportFileName(training));
       document.body.appendChild(link);
       link.click();
       link.remove();

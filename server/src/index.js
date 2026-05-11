@@ -156,13 +156,13 @@ function buildExportRows(nominations = [], attendances = []) {
     nominations.map((nomination) => [nomination.employeeId, nomination])
   );
 
-  const nominatedRows = nominations.map((nomination) => ({
+  const nominatedRows = [...nominationByEmployeeId.values()].map((nomination) => ({
     employeeId: nomination.employeeId,
     employeeName: nomination.employeeName,
     status: attendanceByEmployeeId.has(nomination.employeeId) ? 'Present' : 'Absent'
   }));
 
-  const extraAttendanceRows = attendances
+  const extraAttendanceRows = [...attendanceByEmployeeId.values()]
     .filter((attendance) => !nominationByEmployeeId.has(attendance.employeeId))
     .map((attendance) => ({
       employeeId: attendance.employeeId,
@@ -171,6 +171,37 @@ function buildExportRows(nominations = [], attendances = []) {
     }));
 
   return [...nominatedRows, ...extraAttendanceRows];
+}
+
+function formatDateForFileName(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return 'date';
+
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+
+  return `${year}-${month}-${day}`;
+}
+
+function sanitizeFileNamePart(value, fallback) {
+  const cleaned = String(value || '')
+    .trim()
+    .replace(/[<>:"/\\|?*\x00-\x1F]+/g, '')
+    .replace(/[^a-z0-9 _.-]+/gi, '')
+    .replace(/\s+/g, '_')
+    .replace(/_+/g, '_')
+    .replace(/^[._-]+|[._-]+$/g, '');
+
+  return cleaned || fallback;
+}
+
+function buildExportFileName(training) {
+  const trainingName = sanitizeFileNamePart(training.trainingName, 'Training');
+  const location = sanitizeFileNamePart(training.location, 'Location');
+  const date = formatDateForFileName(training.startDateTime);
+
+  return `${trainingName}_${location}_${date}.xlsx`;
 }
 
 function isMissingNominationTableError(error) {
@@ -898,6 +929,7 @@ app.get('/api/trainings/:id/export', requireAuth, asyncHandler(async (req, res) 
     where: { id: req.params.id },
     select: {
       trainingName: true,
+      location: true,
       startDateTime: true,
       attendances: {
         orderBy: [
@@ -925,14 +957,13 @@ app.get('/api/trainings/:id/export', requireAuth, asyncHandler(async (req, res) 
   if (!training) throw createHttpError(404, 'Training not found.');
 
   const workbook = createAttendanceWorkbook(buildExportRows(training.nominations, training.attendances), {
-    trainingDate: training.startDateTime,
-    includeStatus: true
+    trainingDate: training.startDateTime
   });
-  const safeName = training.trainingName.replace(/[^a-z0-9-_]+/gi, '-').replace(/-+/g, '-');
+  const fileName = buildExportFileName(training);
   const buffer = await workbook.xlsx.writeBuffer();
 
   res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-  res.setHeader('Content-Disposition', `attachment; filename="attendance-${safeName}.xlsx"`);
+  res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
   res.setHeader('Content-Length', buffer.byteLength);
   res.send(Buffer.from(buffer));
 }));

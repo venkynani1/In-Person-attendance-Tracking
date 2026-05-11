@@ -1,20 +1,5 @@
 import ExcelJS from 'exceljs';
 
-const MONTHS = [
-  'Jan',
-  'Feb',
-  'Mar',
-  'Apr',
-  'May',
-  'Jun',
-  'Jul',
-  'Aug',
-  'Sep',
-  'Oct',
-  'Nov',
-  'Dec'
-];
-
 function safeCellValue(value) {
   if (value === undefined || value === null) return '';
   return String(value);
@@ -25,10 +10,10 @@ function formatTrainingDate(value) {
   if (Number.isNaN(date.getTime())) return '';
 
   const day = String(date.getDate()).padStart(2, '0');
-  const month = MONTHS[date.getMonth()];
+  const month = String(date.getMonth() + 1).padStart(2, '0');
   const year = date.getFullYear();
 
-  return `${day}-${month}-${year}`;
+  return `${year}-${month}-${day}`;
 }
 
 function autoAdjustColumnWidths(sheet) {
@@ -61,11 +46,8 @@ export function createAttendanceWorkbook(attendances = [], options = {}) {
   workbook.creator = 'Attendance App';
   workbook.created = new Date();
 
-  const includeStatus = options.includeStatus || attendances.some((attendance) => attendance?.status);
-  const headers = includeStatus
-    ? ['Training Date', 'Employee ID', 'Employee Name', 'Status']
-    : ['Training Date', 'Employee ID', 'Employee Name'];
   const trainingDate = formatTrainingDate(options.trainingDate);
+  const headers = ['Emp ID', 'Emp Name', trainingDate || 'Training Date'];
 
   const sheet = workbook.addWorksheet('Attendance');
   sheet.addRow(headers);
@@ -78,17 +60,11 @@ export function createAttendanceWorkbook(attendances = [], options = {}) {
   };
 
   sortExportRows(attendances).forEach((attendance) => {
-    const row = [
-      trainingDate,
+    sheet.addRow([
       safeCellValue(attendance?.employeeId),
-      safeCellValue(attendance?.employeeName)
-    ];
-
-    if (includeStatus) {
-      row.push(safeCellValue(attendance?.status));
-    }
-
-    sheet.addRow(row);
+      safeCellValue(attendance?.employeeName),
+      safeCellValue(attendance?.status)
+    ]);
   });
 
   autoAdjustColumnWidths(sheet);
