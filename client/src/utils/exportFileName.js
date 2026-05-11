@@ -1,12 +1,26 @@
 function formatDateForFileName(value) {
+  const months = [
+    'Jan',
+    'Feb',
+    'Mar',
+    'Apr',
+    'May',
+    'Jun',
+    'Jul',
+    'Aug',
+    'Sep',
+    'Oct',
+    'Nov',
+    'Dec'
+  ];
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return 'date';
 
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
   const day = String(date.getDate()).padStart(2, '0');
+  const month = months[date.getMonth()];
+  const year = date.getFullYear();
 
-  return `${year}-${month}-${day}`;
+  return `${day}-${month}-${year}`;
 }
 
 function sanitizeFileNamePart(value, fallback) {

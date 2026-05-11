@@ -214,4 +214,4 @@ After deploying Vercel, update Render's `CLIENT_URL` and `PUBLIC_BASE_URL` to th
 - Attendance submission is accepted only while the session is active.
 - Manual stop immediately closes attendance and shows participants that attendance was closed by admin.
 - Each employee can submit once per training because of the `trainingId + employeeId` unique constraint.
-- Excel export includes `Training Date`, `Employee ID`, and `Employee Name`. If nomination/status rows are exported in the future, `Status` is included as the final column.
+- Excel export includes exactly three columns: `Employee ID`, `Employee Name`, and the training date such as `11-May-2026`. Present/Absent values appear under the date column.

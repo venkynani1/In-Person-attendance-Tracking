@@ -1,19 +1,34 @@
 import ExcelJS from 'exceljs';
 
+const MONTHS = [
+  'Jan',
+  'Feb',
+  'Mar',
+  'Apr',
+  'May',
+  'Jun',
+  'Jul',
+  'Aug',
+  'Sep',
+  'Oct',
+  'Nov',
+  'Dec'
+];
+
 function safeCellValue(value) {
   if (value === undefined || value === null) return '';
   return String(value);
 }
 
-function formatTrainingDate(value) {
+function formatExportDate(value) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return '';
 
   const day = String(date.getDate()).padStart(2, '0');
-  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const month = MONTHS[date.getMonth()];
   const year = date.getFullYear();
 
-  return `${year}-${month}-${day}`;
+  return `${day}-${month}-${year}`;
 }
 
 function autoAdjustColumnWidths(sheet) {
@@ -46,11 +61,14 @@ export function createAttendanceWorkbook(attendances = [], options = {}) {
   workbook.creator = 'Attendance App';
   workbook.created = new Date();
 
-  const trainingDate = formatTrainingDate(options.trainingDate);
-  const headers = ['Emp ID', 'Emp Name', trainingDate || 'Training Date'];
+  const exportDate = formatExportDate(options.exportDate);
 
   const sheet = workbook.addWorksheet('Attendance');
-  sheet.addRow(headers);
+  sheet.columns = [
+    { header: 'Employee ID', key: 'employeeId', width: 18 },
+    { header: 'Employee Name', key: 'employeeName', width: 30 },
+    { header: exportDate, key: 'attendanceStatus', width: 18 }
+  ];
 
   sheet.getRow(1).font = { bold: true };
   sheet.getRow(1).fill = {
@@ -60,11 +78,11 @@ export function createAttendanceWorkbook(attendances = [], options = {}) {
   };
 
   sortExportRows(attendances).forEach((attendance) => {
-    sheet.addRow([
-      safeCellValue(attendance?.employeeId),
-      safeCellValue(attendance?.employeeName),
-      safeCellValue(attendance?.status)
-    ]);
+    sheet.addRow({
+      employeeId: safeCellValue(attendance?.employeeId),
+      employeeName: safeCellValue(attendance?.employeeName),
+      attendanceStatus: safeCellValue(attendance?.attendanceStatus)
+    });
   });
 
   autoAdjustColumnWidths(sheet);

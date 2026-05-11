@@ -159,7 +159,7 @@ function buildExportRows(nominations = [], attendances = []) {
   const nominatedRows = [...nominationByEmployeeId.values()].map((nomination) => ({
     employeeId: nomination.employeeId,
     employeeName: nomination.employeeName,
-    status: attendanceByEmployeeId.has(nomination.employeeId) ? 'Present' : 'Absent'
+    attendanceStatus: attendanceByEmployeeId.has(nomination.employeeId) ? 'Present' : 'Absent'
   }));
 
   const extraAttendanceRows = [...attendanceByEmployeeId.values()]
@@ -167,21 +167,35 @@ function buildExportRows(nominations = [], attendances = []) {
     .map((attendance) => ({
       employeeId: attendance.employeeId,
       employeeName: attendance.employeeName,
-      status: 'Present'
+      attendanceStatus: 'Present'
     }));
 
   return [...nominatedRows, ...extraAttendanceRows];
 }
 
 function formatDateForFileName(value) {
+  const months = [
+    'Jan',
+    'Feb',
+    'Mar',
+    'Apr',
+    'May',
+    'Jun',
+    'Jul',
+    'Aug',
+    'Sep',
+    'Oct',
+    'Nov',
+    'Dec'
+  ];
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return 'date';
 
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
   const day = String(date.getDate()).padStart(2, '0');
+  const month = months[date.getMonth()];
+  const year = date.getFullYear();
 
-  return `${year}-${month}-${day}`;
+  return `${day}-${month}-${year}`;
 }
 
 function sanitizeFileNamePart(value, fallback) {
@@ -957,7 +971,7 @@ app.get('/api/trainings/:id/export', requireAuth, asyncHandler(async (req, res) 
   if (!training) throw createHttpError(404, 'Training not found.');
 
   const workbook = createAttendanceWorkbook(buildExportRows(training.nominations, training.attendances), {
-    trainingDate: training.startDateTime
+    exportDate: training.startDateTime
   });
   const fileName = buildExportFileName(training);
   const buffer = await workbook.xlsx.writeBuffer();
