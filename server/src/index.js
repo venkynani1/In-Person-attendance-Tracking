@@ -3,6 +3,8 @@ import bcrypt from 'bcryptjs';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import express from 'express';
+import rateLimit from 'express-rate-limit';
+import helmet from 'helmet';
 import jwt from 'jsonwebtoken';
 import multer from 'multer';
 import QRCode from 'qrcode';
@@ -62,8 +64,26 @@ const corsOptions = {
   credentials: true
 };
 
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 5,
+  message: 'Too many authentication attempts, please try again later.',
+  standardHeaders: true,
+  legacyHeaders: false
+});
+
+const generalLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 100,
+  message: 'Too many requests, please try again later.',
+  standardHeaders: true,
+  legacyHeaders: false
+});
+
+app.use(helmet());
 app.use(cors(corsOptions));
 app.use(express.json());
+app.use(generalLimiter);
 
 function asyncHandler(handler) {
   return (req, res, next) => Promise.resolve(handler(req, res, next)).catch(next);
@@ -912,7 +932,7 @@ app.get('/api/health', (req, res) => {
   });
 });
 
-app.post('/api/auth/signup', asyncHandler(async (req, res) => {
+app.post('/api/auth/signup', authLimiter, asyncHandler(async (req, res) => {
   await ensurePasswordResetColumns();
 
   const { username, password, confirmPassword } = req.body;
@@ -945,7 +965,7 @@ app.post('/api/auth/signup', asyncHandler(async (req, res) => {
   });
 }));
 
-app.post('/api/auth/login', asyncHandler(async (req, res) => {
+app.post('/api/auth/login', authLimiter, asyncHandler(async (req, res) => {
   await ensurePasswordResetColumns();
 
   const { username, password } = req.body;
@@ -978,7 +998,7 @@ app.post('/api/auth/login', asyncHandler(async (req, res) => {
   });
 }));
 
-app.post('/api/auth/forgot-password', asyncHandler(async (req, res) => {
+app.post('/api/auth/forgot-password', authLimiter, asyncHandler(async (req, res) => {
   await ensurePasswordResetColumns();
 
   const { username } = req.body;
@@ -1017,7 +1037,7 @@ app.post('/api/auth/forgot-password', asyncHandler(async (req, res) => {
   });
 }));
 
-app.post('/api/auth/reset-password', asyncHandler(async (req, res) => {
+app.post('/api/auth/reset-password', authLimiter, asyncHandler(async (req, res) => {
   await ensurePasswordResetColumns();
 
   const { token, newPassword } = req.body;
