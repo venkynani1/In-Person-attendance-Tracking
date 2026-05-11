@@ -1001,7 +1001,7 @@ app.get('/api/trainings/:id/export', requireAuth, asyncHandler(async (req, res) 
   res.send(Buffer.from(buffer));
 }));
 
-app.patch('/api/trainings/:id/open', requireAuth, asyncHandler(async (req, res) => {
+async function openTrainingAttendance(req, res) {
   const training = await getTrainingOrThrow(req.params.id, req.user, {
     include: {
       _count: { select: { attendances: true } }
@@ -1033,7 +1033,10 @@ app.patch('/api/trainings/:id/open', requireAuth, asyncHandler(async (req, res) 
   });
 
   res.json((await trainingResponses([openedTraining]))[0]);
-}));
+}
+
+app.patch('/api/trainings/:id/open', requireAuth, asyncHandler(openTrainingAttendance));
+app.patch('/trainings/:id/open', requireAuth, asyncHandler(openTrainingAttendance));
 
 app.patch('/api/trainings/:id/stop', requireAuth, asyncHandler(async (req, res) => {
   const training = await getTrainingOrThrow(req.params.id, req.user, {
