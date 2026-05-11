@@ -141,6 +141,9 @@ function AttendPage() {
   const sessionState = training ? getSessionState(training, now) : null;
   const countdownMessage = training ? getCountdownMessage(training, now) : '';
   const closed = sessionState?.key !== 'active';
+  const submittedMessage = training
+    ? `Thank You for attending the ${training.trainingName} with ${training.trainerName}. Your attendance is captured.`
+    : '';
 
   return (
     <main className="public-page">
@@ -152,6 +155,11 @@ function AttendPage() {
           </div>
         ) : error && !training ? (
           <div className="alert error">{error}</div>
+        ) : submitted && training ? (
+          <div className="attendance-thank-you" role="status" aria-live="polite">
+            <CheckCircle2 size={44} aria-hidden="true" />
+            <h1>{submittedMessage}</h1>
+          </div>
         ) : (
           <>
             <div className="public-heading">
