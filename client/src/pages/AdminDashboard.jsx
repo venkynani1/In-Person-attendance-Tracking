@@ -82,9 +82,14 @@ function AdminDashboard() {
       setOpeningId(training.id);
       setActionMessage('');
       setError('');
-      await trainingAPI.openAttendance(training.id);
+      const response = await trainingAPI.openAttendance(training.id);
       setActionMessage(`Attendance opened for ${training.trainingName}.`);
-      await loadTrainings();
+      // Update only the specific training in state instead of refetching all
+      setTrainings((prev) =>
+        prev.map((t) =>
+          t.id === training.id ? response.data : t
+        )
+      );
     } catch (err) {
       setError(getApiError(err, 'Failed to open attendance.'));
     } finally {
@@ -99,7 +104,10 @@ function AdminDashboard() {
       setDeletingId(deleteTarget.id);
       await trainingAPI.deleteTraining(deleteTarget.id);
       setDeleteTarget(null);
-      await loadTrainings();
+      // Remove from state instead of refetching
+      setTrainings((prev) =>
+        prev.filter((t) => t.id !== deleteTarget.id)
+      );
     } catch (err) {
       setError(getApiError(err, 'Failed to delete training.'));
     } finally {
@@ -113,9 +121,14 @@ function AdminDashboard() {
     try {
       setStoppingId(stopTarget.id);
       setActionMessage('');
-      await trainingAPI.stopAttendance(stopTarget.id);
+      const response = await trainingAPI.stopAttendance(stopTarget.id);
       setStopTarget(null);
-      await loadTrainings();
+      // Update only the specific training instead of refetching all
+      setTrainings((prev) =>
+        prev.map((t) =>
+          t.id === stopTarget.id ? response.data : t
+        )
+      );
     } catch (err) {
       setError(getApiError(err, 'Failed to stop attendance.'));
     } finally {

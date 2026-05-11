@@ -273,11 +273,11 @@ function TrainingDetails() {
       if (nominationFileInputRef.current) {
         nominationFileInputRef.current.value = '';
       }
+      // Update only the nominated count in state
       setTraining((current) => current ? {
         ...current,
         nominatedCount: response.data.nominatedCount ?? current.nominatedCount
       } : current);
-      await loadDetails({ silent: true });
     } catch (err) {
       setNominationError(getApiError(err, 'Failed to upload nominations.'));
     } finally {
@@ -291,9 +291,9 @@ function TrainingDetails() {
       setError('');
       setAttendanceActionMessage('');
       const response = await trainingAPI.openAttendance(id);
+      // Update training state directly instead of full refetch
       setTraining(response.data);
       setAttendanceActionMessage('Attendance opened successfully. Participants can submit now.');
-      await loadDetails({ silent: true });
     } catch (err) {
       setError(getApiError(err, 'Failed to open attendance.'));
     } finally {
@@ -306,9 +306,18 @@ function TrainingDetails() {
       setSessionActionId(session.id);
       setError('');
       setAttendanceActionMessage('');
-      await trainingAPI.openTrainingSession(id, session.id);
+      const response = await trainingAPI.openTrainingSession(id, session.id);
       setAttendanceActionMessage(`Attendance opened for Day ${session.dayNumber}.`);
-      await loadDetails({ silent: true });
+      // Update only the specific session in the training state
+      setTraining((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          sessions: prev.sessions.map((s) =>
+            s.id === session.id ? response.data : s
+          )
+        };
+      });
     } catch (err) {
       setError(getApiError(err, 'Failed to open attendance.'));
     } finally {
@@ -321,9 +330,18 @@ function TrainingDetails() {
       setSessionActionId(session.id);
       setError('');
       setAttendanceActionMessage('');
-      await trainingAPI.stopTrainingSession(id, session.id);
+      const response = await trainingAPI.stopTrainingSession(id, session.id);
       setAttendanceActionMessage(`Attendance closed for Day ${session.dayNumber}.`);
-      await loadDetails({ silent: true });
+      // Update only the specific session in the training state
+      setTraining((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          sessions: prev.sessions.map((s) =>
+            s.id === session.id ? response.data : s
+          )
+        };
+      });
     } catch (err) {
       setError(getApiError(err, 'Failed to close attendance.'));
     } finally {
@@ -336,9 +354,9 @@ function TrainingDetails() {
       setStopping(true);
       setAttendanceActionMessage('');
       const response = await trainingAPI.stopAttendance(id);
+      // Update training state directly instead of full refetch
       setTraining(response.data);
       setShowStopConfirm(false);
-      await loadDetails({ silent: true });
     } catch (err) {
       setError(getApiError(err, 'Failed to stop attendance.'));
     } finally {

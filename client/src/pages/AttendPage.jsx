@@ -111,7 +111,7 @@ function AttendPage() {
       setAttendanceSubmissionLock(status?.training?.id, status?.training?.sessionId);
       setSuccess('Attendance submitted successfully');
       setSubmitted(true);
-      await loadStatus();
+      // No need to call loadStatus again - we already know the submission succeeded
     } catch (err) {
       const message = getApiError(err, 'Could not submit attendance.');
       setError(
@@ -119,6 +119,7 @@ function AttendPage() {
           ? 'You have already submitted attendance for this session.'
           : message.includes('already') ? 'Attendance already submitted' : message
       );
+      // Only refresh status if there was an error to see the current state
       await loadStatus();
     } finally {
       setSubmitting(false);
