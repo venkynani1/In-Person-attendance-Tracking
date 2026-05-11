@@ -14,7 +14,7 @@ dotenv.config();
 
 const app = express();
 const prisma = new PrismaClient();
-const port = process.env.PORT || 4000;
+const PORT = process.env.PORT || 5000;
 const clientUrl = process.env.CLIENT_URL || 'http://localhost:5173';
 const publicBaseUrl = process.env.PUBLIC_BASE_URL || clientUrl;
 const upload = multer({
@@ -1766,6 +1766,9 @@ process.on('SIGTERM', async () => {
   process.exit(0);
 });
 
-app.listen(port, () => {
-  console.log(`Attendance API listening on port ${port}`);
+console.log('Starting Express server...');
+console.log('PORT:', PORT);
+
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`Server running on port ${PORT}`);
 });
