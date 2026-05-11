@@ -74,7 +74,7 @@ function CreateTraining() {
               <input name="trainingName" value={form.trainingName} onChange={updateField} required />
             </label>
             <label>
-              <span>Description</span>
+              <span>Description optional</span>
               <textarea name="description" value={form.description} onChange={updateField} rows="3" />
             </label>
           </section>

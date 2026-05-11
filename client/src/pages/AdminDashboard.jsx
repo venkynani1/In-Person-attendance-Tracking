@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { CalendarClock, CircleStop, Download, Eye, Filter, MapPin, MonitorUp, Plus, RefreshCw, Search, Trash2, UserCheck, UsersRound } from 'lucide-react';
+import { CalendarClock, CircleStop, Download, Eye, Filter, MapPin, MonitorUp, Play, Plus, RefreshCw, Search, Trash2, UserCheck, UsersRound } from 'lucide-react';
 import Header from '../components/Header.jsx';
 import { useAuth } from '../context/AuthContext.jsx';
 import { getApiError, trainingAPI } from '../services/api.js';
@@ -27,8 +27,10 @@ function AdminDashboard() {
   const [exportingId, setExportingId] = useState('');
   const [deletingId, setDeletingId] = useState('');
   const [deleteTarget, setDeleteTarget] = useState(null);
+  const [openingId, setOpeningId] = useState('');
   const [stoppingId, setStoppingId] = useState('');
   const [stopTarget, setStopTarget] = useState(null);
+  const [actionMessage, setActionMessage] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [now, setNow] = useState(() => new Date());
@@ -75,6 +77,21 @@ function AdminDashboard() {
     }
   }
 
+  async function handleOpenAttendance(training) {
+    try {
+      setOpeningId(training.id);
+      setActionMessage('');
+      setError('');
+      await trainingAPI.openAttendance(training.id);
+      setActionMessage(`Attendance opened for ${training.trainingName}.`);
+      await loadTrainings();
+    } catch (err) {
+      setError(getApiError(err, 'Failed to open attendance.'));
+    } finally {
+      setOpeningId('');
+    }
+  }
+
   async function confirmDelete() {
     if (!deleteTarget) return;
 
@@ -95,6 +112,7 @@ function AdminDashboard() {
 
     try {
       setStoppingId(stopTarget.id);
+      setActionMessage('');
       await trainingAPI.stopAttendance(stopTarget.id);
       setStopTarget(null);
       await loadTrainings();
@@ -142,6 +160,7 @@ function AdminDashboard() {
         </div>
 
         {error && <div className="alert error">{error}</div>}
+        {actionMessage && <div className="alert success">{actionMessage}</div>}
 
         {user?.role === 'MASTER_ADMIN' && <MasterAdminUsers />}
 
@@ -243,6 +262,9 @@ function AdminDashboard() {
                       </tr>
                     ) : filteredTrainings.map((training) => {
                       const state = getSessionState(training, now);
+                      const canOpen = state.key !== 'active' &&
+                        !training.manuallyStopped &&
+                        now.getTime() < new Date(training.endDateTime).getTime();
                       const canStop = state.key === 'active' && !training.manuallyStopped;
 
                       return (
@@ -269,6 +291,16 @@ function AdminDashboard() {
                               <MonitorUp size={18} aria-hidden="true" />
                               <span className="sr-only">QR Display</span>
                             </Link>
+                            <button
+                              className="icon-button"
+                              type="button"
+                              title="Open attendance"
+                              onClick={() => handleOpenAttendance(training)}
+                              disabled={!canOpen || openingId === training.id}
+                            >
+                              <Play size={18} aria-hidden="true" />
+                              <span className="sr-only">Open attendance</span>
+                            </button>
                             <button
                               className="icon-button"
                               type="button"

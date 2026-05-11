@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { CalendarClock, Check, CircleStop, Copy, Download, ExternalLink, Link2, MapPin, MonitorUp, RefreshCw, Sparkles, Timer, Trash2, Upload, UserX, UsersRound } from 'lucide-react';
+import { CalendarClock, Check, CircleStop, Copy, Download, ExternalLink, Link2, MapPin, MonitorUp, Play, RefreshCw, Sparkles, Timer, Trash2, Upload, UserX, UsersRound } from 'lucide-react';
 import Header from '../components/Header.jsx';
 import { getApiError, trainingAPI } from '../services/api.js';
 import { buildAttendanceReportFileName } from '../utils/exportFileName.js';
@@ -22,6 +22,8 @@ function TrainingDetails() {
   const [uploadingNominations, setUploadingNominations] = useState(false);
   const [nominationMessage, setNominationMessage] = useState('');
   const [nominationError, setNominationError] = useState('');
+  const [attendanceActionMessage, setAttendanceActionMessage] = useState('');
+  const [opening, setOpening] = useState(false);
   const [stopping, setStopping] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [showStopConfirm, setShowStopConfirm] = useState(false);
@@ -180,9 +182,26 @@ function TrainingDetails() {
     }
   }
 
+  async function openAttendance() {
+    try {
+      setOpening(true);
+      setError('');
+      setAttendanceActionMessage('');
+      const response = await trainingAPI.openAttendance(id);
+      setTraining(response.data);
+      setAttendanceActionMessage('Attendance opened successfully. Participants can submit now.');
+      await loadDetails({ silent: true });
+    } catch (err) {
+      setError(getApiError(err, 'Failed to open attendance.'));
+    } finally {
+      setOpening(false);
+    }
+  }
+
   async function stopAttendance() {
     try {
       setStopping(true);
+      setAttendanceActionMessage('');
       const response = await trainingAPI.stopAttendance(id);
       setTraining(response.data);
       setShowStopConfirm(false);
@@ -209,6 +228,12 @@ function TrainingDetails() {
   const sessionState = training ? getSessionState(training, now) : null;
   const countdownMessage = training ? getCountdownMessage(training, now) : '';
   const summaryItems = training ? getSmartSummaryItems(training, attendance.length, now) : [];
+  const canOpenAttendance = Boolean(
+    training &&
+    sessionState?.key !== 'active' &&
+    !training.manuallyStopped &&
+    now.getTime() < new Date(training.endDateTime).getTime()
+  );
   const canStopAttendance = sessionState?.key === 'active' && !training?.manuallyStopped;
   const sortedAttendance = [...attendance].sort((first, second) => {
     const nameComparison = first.employeeName.localeCompare(second.employeeName);
@@ -222,6 +247,7 @@ function TrainingDetails() {
       <Header />
       <main className="container">
         {error && <div className="alert error">{error}</div>}
+        {attendanceActionMessage && <div className="alert success">{attendanceActionMessage}</div>}
 
         {loading ? (
           <section className="empty-state">
@@ -262,6 +288,12 @@ function TrainingDetails() {
                   <Download size={18} aria-hidden="true" />
                   {exporting ? 'Exporting...' : 'Download Report'}
                 </button>
+                {canOpenAttendance && (
+                  <button className="button button-primary compact" type="button" onClick={openAttendance} disabled={opening}>
+                    <Play size={18} aria-hidden="true" />
+                    {opening ? 'Opening...' : 'Open Attendance'}
+                  </button>
+                )}
                 {canStopAttendance && (
                   <button className="button button-danger compact" type="button" onClick={() => setShowStopConfirm(true)}>
                     <CircleStop size={18} aria-hidden="true" />

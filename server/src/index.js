@@ -36,6 +36,7 @@ let nominationTableReadyPromise = null;
 let trainingOwnershipReadyPromise = null;
 let passwordResetColumnsReadyPromise = null;
 let attendanceIpAddressReadyPromise = null;
+let attendanceOpenedAtReadyPromise = null;
 
 const allowedOrigins = [
   'https://in-person-attendance-tracking.vercel.app',
@@ -290,8 +291,23 @@ async function ensureTrainingOwnershipColumn() {
   return trainingOwnershipReadyPromise;
 }
 
+async function ensureAttendanceOpenedAtColumn() {
+  if (!attendanceOpenedAtReadyPromise) {
+    attendanceOpenedAtReadyPromise = prisma.$executeRawUnsafe(`
+      ALTER TABLE "Training"
+      ADD COLUMN IF NOT EXISTS "attendanceOpenedAt" TIMESTAMP(3);
+    `).catch((error) => {
+      attendanceOpenedAtReadyPromise = null;
+      throw error;
+    });
+  }
+
+  return attendanceOpenedAtReadyPromise;
+}
+
 async function getTrainingOrThrow(id, user, options = {}) {
   await ensureTrainingOwnershipColumn();
+  await ensureAttendanceOpenedAtColumn();
 
   const queryOptions = options.select
     ? { ...options, select: { ...options.select, createdById: true } }
@@ -532,8 +548,9 @@ function getTrainingStatus(training) {
   const endsAt = new Date(training.endDateTime);
 
   if (training.manuallyStopped) return 'closed';
-  if (now < startsAt) return 'upcoming';
   if (now > endsAt) return 'expired';
+  if (training.attendanceOpenedAt) return 'open';
+  if (now < startsAt) return 'upcoming';
   return 'open';
 }
 
@@ -777,6 +794,7 @@ app.patch('/api/admin/users/:id/reject', requireAuth, requireMasterAdmin, asyncH
 
 app.post('/api/trainings', requireAuth, asyncHandler(async (req, res) => {
   await ensureTrainingOwnershipColumn();
+  await ensureAttendanceOpenedAtColumn();
 
   const {
     trainingName,
@@ -823,6 +841,7 @@ app.post('/api/trainings', requireAuth, asyncHandler(async (req, res) => {
 
 app.get('/api/trainings', requireAuth, asyncHandler(async (req, res) => {
   await ensureTrainingOwnershipColumn();
+  await ensureAttendanceOpenedAtColumn();
 
   const trainings = await prisma.training.findMany({
     where: trainingVisibilityWhere(req.user),
@@ -982,6 +1001,40 @@ app.get('/api/trainings/:id/export', requireAuth, asyncHandler(async (req, res) 
   res.send(Buffer.from(buffer));
 }));
 
+app.patch('/api/trainings/:id/open', requireAuth, asyncHandler(async (req, res) => {
+  const training = await getTrainingOrThrow(req.params.id, req.user, {
+    include: {
+      _count: { select: { attendances: true } }
+    }
+  });
+  const status = getTrainingStatus(training);
+
+  if (training.manuallyStopped) {
+    throw createHttpError(400, 'Attendance has already been stopped for this training.');
+  }
+
+  if (status === 'expired') {
+    throw createHttpError(400, 'Attendance cannot be opened after the training end time.');
+  }
+
+  if (status === 'open') {
+    res.json((await trainingResponses([training]))[0]);
+    return;
+  }
+
+  const openedTraining = await prisma.training.update({
+    where: { id: req.params.id },
+    data: {
+      attendanceOpenedAt: new Date()
+    },
+    include: {
+      _count: { select: { attendances: true } }
+    }
+  });
+
+  res.json((await trainingResponses([openedTraining]))[0]);
+}));
+
 app.patch('/api/trainings/:id/stop', requireAuth, asyncHandler(async (req, res) => {
   const training = await getTrainingOrThrow(req.params.id, req.user, {
     include: {
@@ -1019,6 +1072,8 @@ app.delete('/api/trainings/:id', requireAuth, asyncHandler(async (req, res) => {
 }));
 
 app.get('/api/attend/:token/status', asyncHandler(async (req, res) => {
+  await ensureAttendanceOpenedAtColumn();
+
   const training = await prisma.training.findUnique({
     where: { token: req.params.token },
     select: {
@@ -1031,6 +1086,7 @@ app.get('/api/attend/:token/status', asyncHandler(async (req, res) => {
       endDateTime: true,
       token: true,
       manuallyStopped: true,
+      attendanceOpenedAt: true,
       stoppedAt: true
     }
   });
@@ -1045,6 +1101,7 @@ app.get('/api/attend/:token/status', asyncHandler(async (req, res) => {
 
 app.post('/api/attend/:token', asyncHandler(async (req, res) => {
   await ensureAttendanceIpAddressColumn();
+  await ensureAttendanceOpenedAtColumn();
 
   const { employeeId, employeeName } = req.body;
   const normalizedEmployeeId = String(employeeId || '').trim();
@@ -1065,7 +1122,8 @@ app.post('/api/attend/:token', asyncHandler(async (req, res) => {
       id: true,
       startDateTime: true,
       endDateTime: true,
-      manuallyStopped: true
+      manuallyStopped: true,
+      attendanceOpenedAt: true
     }
   });
   if (!training) throw createHttpError(404, 'Attendance link not found.');

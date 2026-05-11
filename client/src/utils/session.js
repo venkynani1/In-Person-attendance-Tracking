@@ -28,15 +28,7 @@ export function getSessionState(training, now = new Date()) {
   const currentTime = now.getTime();
   const startsAt = new Date(training.startDateTime).getTime();
   const endsAt = new Date(training.endDateTime).getTime();
-
-  if (currentTime < startsAt) {
-    return {
-      key: 'not-started',
-      label: 'Not Started',
-      badgeClass: 'not-started',
-      targetTime: startsAt
-    };
-  }
+  const manuallyOpened = Boolean(training.attendanceOpenedAt);
 
   if (currentTime > endsAt) {
     return {
@@ -44,6 +36,25 @@ export function getSessionState(training, now = new Date()) {
       label: 'Closed',
       badgeClass: 'closed',
       targetTime: null
+    };
+  }
+
+  if (manuallyOpened) {
+    return {
+      key: 'active',
+      label: 'Active',
+      badgeClass: 'active',
+      targetTime: endsAt,
+      reason: 'manual-open'
+    };
+  }
+
+  if (currentTime < startsAt) {
+    return {
+      key: 'not-started',
+      label: 'Not Started',
+      badgeClass: 'not-started',
+      targetTime: startsAt
     };
   }
 

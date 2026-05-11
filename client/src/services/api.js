@@ -173,6 +173,11 @@ export const trainingAPI = {
       })
     );
   },
+  openAttendance(id) {
+    return requestWithRetry(() =>
+      api.patch(`/api/trainings/${id}/open`)
+    );
+  },
   stopAttendance(id) {
     return requestWithRetry(() =>
       api.patch(`/api/trainings/${id}/stop`)
