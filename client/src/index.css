@@ -719,6 +719,10 @@ label span {
   overflow-x: auto;
 }
 
+.daily-sessions-table {
+  min-width: 1320px;
+}
+
 table {
   border-collapse: separate;
   border-spacing: 0;
@@ -1220,6 +1224,75 @@ select:focus {
 .qr-download-inline {
   margin-top: 0.9rem;
   text-align: left;
+}
+
+.daily-sessions-section {
+  margin-bottom: 1.15rem;
+}
+
+.session-count-debug {
+  color: var(--muted);
+  font-size: 0.9rem;
+  font-weight: 820;
+  margin: -0.2rem 0 0.75rem;
+}
+
+.session-link-cell,
+.session-qr-link {
+  align-items: center;
+  display: grid;
+  gap: 0.5rem;
+  grid-template-columns: minmax(210px, 1fr) 40px;
+  min-width: 285px;
+}
+
+.session-link-cell input,
+.session-qr-link input {
+  font-size: 0.82rem;
+  min-height: 40px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.session-button-group {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  min-width: 240px;
+}
+
+.session-action-button {
+  flex: 0 0 auto;
+  justify-content: center;
+  min-height: 38px;
+  white-space: nowrap;
+}
+
+.session-qr-modal {
+  max-width: 560px;
+}
+
+.session-qr-link {
+  margin-top: 1rem;
+}
+
+.session-qr-preview {
+  align-items: center;
+  background: var(--surface-soft);
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  display: flex;
+  justify-content: center;
+  margin-top: 1rem;
+  min-height: 280px;
+  padding: 1rem;
+}
+
+.session-qr-preview img {
+  aspect-ratio: 1;
+  max-width: 280px;
+  width: 100%;
 }
 
 .qr-loading {

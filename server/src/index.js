@@ -765,6 +765,76 @@ function trainingResponse(training, nominatedCount = 0) {
   };
 }
 
+async function createMissingSessionsForTraining(training) {
+  if (Array.isArray(training.sessions) && training.sessions.length > 0) {
+    return training.sessions;
+  }
+
+  const isSeries = training.trainingType === 'SERIES';
+  const dayCount = isSeries ? Math.max(2, Number(training.numberOfDays) || 2) : 1;
+  const firstStart = new Date(training.startDateTime);
+  const endTimeTemplate = new Date(training.endDateTime);
+  const sessionsToCreate = [];
+
+  for (let index = 0; index < dayCount; index += 1) {
+    const sessionDate = new Date(firstStart);
+    sessionDate.setDate(firstStart.getDate() + index);
+    sessionDate.setHours(0, 0, 0, 0);
+
+    const sessionStart = new Date(sessionDate);
+    sessionStart.setHours(
+      firstStart.getHours(),
+      firstStart.getMinutes(),
+      firstStart.getSeconds(),
+      firstStart.getMilliseconds()
+    );
+
+    const sessionEnd = new Date(sessionDate);
+    sessionEnd.setHours(
+      endTimeTemplate.getHours(),
+      endTimeTemplate.getMinutes(),
+      endTimeTemplate.getSeconds(),
+      endTimeTemplate.getMilliseconds()
+    );
+
+    if (sessionEnd <= sessionStart) {
+      sessionEnd.setDate(sessionEnd.getDate() + 1);
+    }
+
+    sessionsToCreate.push({
+      trainingId: training.id,
+      sessionDate,
+      startDateTime: sessionStart,
+      endDateTime: isSeries ? sessionEnd : new Date(training.endDateTime),
+      dayNumber: index + 1,
+      token: index === 0 && training.token ? training.token : await generateUniqueToken(),
+      attendanceOpenedAt: index === 0 ? training.attendanceOpenedAt : null,
+      manuallyStopped: index === 0 ? training.manuallyStopped : false,
+      stoppedAt: index === 0 ? training.stoppedAt : null
+    });
+  }
+
+  console.log('BACKFILLING MISSING TRAINING SESSIONS:', sessionsToCreate.map((session) => ({
+    trainingId: session.trainingId,
+    dayNumber: session.dayNumber,
+    token: session.token
+  })));
+
+  await prisma.trainingSession.createMany({
+    data: sessionsToCreate,
+    skipDuplicates: true
+  });
+
+  return prisma.trainingSession.findMany({
+    where: { trainingId: training.id },
+    orderBy: { dayNumber: 'asc' },
+    include: {
+      attendances: true,
+      _count: { select: { attendances: true } }
+    }
+  });
+}
+
 async function generateUniqueToken() {
   await ensureTrainingSessionsSchema();
 
@@ -1192,9 +1262,11 @@ app.post('/api/trainings', requireAuth, async (req, res, next) => {
         });
       }
 
+      console.log('CREATED SERIES SESSIONS:', sessionsToCreate);
+
       const lastEnd = sessionsToCreate[sessionsToCreate.length - 1].endDateTime;
 
-      return tx.training.create({
+      const createdTraining = await tx.training.create({
         data: {
           trainingName: cleanTrainingName,
           trainerName: cleanTrainerName,
@@ -1218,6 +1290,10 @@ app.post('/api/trainings', requireAuth, async (req, res, next) => {
           _count: { select: { attendances: true } }
         }
       });
+
+      console.log('CREATED TRAINING:', createdTraining.sessions);
+
+      return createdTraining;
     });
 
     return res.status(201).json(trainingResponse(result));
@@ -1254,11 +1330,34 @@ app.get('/api/trainings', requireAuth, asyncHandler(async (req, res) => {
 app.get('/api/trainings/:id', requireAuth, asyncHandler(async (req, res) => {
   const training = await getTrainingOrThrow(req.params.id, req.user, {
     include: {
+      sessions: {
+        orderBy: { dayNumber: 'asc' },
+        include: {
+          attendances: true,
+          _count: { select: { attendances: true } }
+        }
+      },
+      attendances: true,
+      nominations: true,
       _count: { select: { attendances: true } }
     }
   });
+  const sessions = await createMissingSessionsForTraining(training);
+  const trainingWithSessions = {
+    ...training,
+    sessions
+  };
 
-  res.json((await trainingResponses([training]))[0]);
+  console.log(
+    'TRAINING SESSIONS:',
+    trainingWithSessions.sessions?.map((session) => ({
+      id: session.id,
+      dayNumber: session.dayNumber,
+      token: session.token
+    }))
+  );
+
+  res.json((await trainingResponses([trainingWithSessions]))[0]);
 }));
 
 app.get('/api/trainings/:id/qr', requireAuth, asyncHandler(async (req, res) => {
@@ -1303,15 +1402,18 @@ app.get('/api/trainings/:id/attendance', requireAuth, asyncHandler(async (req, r
 }));
 
 app.get('/api/trainings/:id/sessions', requireAuth, asyncHandler(async (req, res) => {
-  await getTrainingOrThrow(req.params.id, req.user);
-
-  const sessions = await prisma.trainingSession.findMany({
-    where: { trainingId: req.params.id },
-    orderBy: { dayNumber: 'asc' },
+  const training = await getTrainingOrThrow(req.params.id, req.user, {
     include: {
-      _count: { select: { attendances: true } }
+      sessions: {
+        orderBy: { dayNumber: 'asc' },
+        include: {
+          attendances: true,
+          _count: { select: { attendances: true } }
+        }
+      }
     }
   });
+  const sessions = await createMissingSessionsForTraining(training);
 
   res.json(sessions.map(sessionResponse));
 }));

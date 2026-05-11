@@ -159,6 +159,11 @@ export const trainingAPI = {
       api.get(`/api/trainings/${id}/sessions`)
     );
   },
+  getTrainingSessions(id) {
+    return requestWithRetry(() =>
+      api.get(`/api/trainings/${id}/sessions`)
+    );
+  },
   getNominations(id) {
     return requestWithRetry(() =>
       api.get(`/api/trainings/${id}/nominations`)
@@ -185,6 +190,13 @@ export const trainingAPI = {
       })
     );
   },
+  getTrainingSessionQr(id, sessionId) {
+    return requestWithRetry(() =>
+      api.get(`/api/trainings/${id}/sessions/${sessionId}/qr`, {
+        responseType: 'blob'
+      })
+    );
+  },
   exportAttendance(id) {
     return requestWithRetry(() =>
       api.get(`/api/trainings/${id}/export`, {
@@ -202,7 +214,17 @@ export const trainingAPI = {
       api.patch(`/api/trainings/${id}/sessions/${sessionId}/open`)
     );
   },
+  openTrainingSession(id, sessionId) {
+    return requestWithRetry(() =>
+      api.patch(`/api/trainings/${id}/sessions/${sessionId}/open`)
+    );
+  },
   stopSessionAttendance(id, sessionId) {
+    return requestWithRetry(() =>
+      api.patch(`/api/trainings/${id}/sessions/${sessionId}/stop`)
+    );
+  },
+  stopTrainingSession(id, sessionId) {
     return requestWithRetry(() =>
       api.patch(`/api/trainings/${id}/sessions/${sessionId}/stop`)
     );

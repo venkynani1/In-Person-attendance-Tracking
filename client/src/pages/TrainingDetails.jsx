@@ -7,6 +7,28 @@ import { buildAttendanceReportFileName } from '../utils/exportFileName.js';
 import { downloadQrAsJpg } from '../utils/qrDownload.js';
 import { formatDateTime, getCountdownMessage, getSessionState, getSmartSummaryItems } from '../utils/session.js';
 
+function getSessionAttendanceLink(session) {
+  if (session?.attendanceLink) return session.attendanceLink;
+  if (session?.token) return `${window.location.origin}/attend/${session.token}`;
+  return '';
+}
+
+function formatSessionDate(value) {
+  return new Date(value).toLocaleDateString([], { dateStyle: 'medium' });
+}
+
+function formatSessionTime(value) {
+  return new Date(value).toLocaleTimeString([], {
+    hour: 'numeric',
+    minute: '2-digit'
+  });
+}
+
+function getSessionStatusLabel(session, state) {
+  if (state.key === 'not-started' && !session.attendanceOpenedAt) return 'Not Opened';
+  return state.label;
+}
+
 function TrainingDetails() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -33,16 +55,28 @@ function TrainingDetails() {
   const [qrSrc, setQrSrc] = useState('');
   const [qrDownloadError, setQrDownloadError] = useState('');
   const [downloadingQr, setDownloadingQr] = useState(false);
+  const [selectedQrSession, setSelectedQrSession] = useState(null);
+  const [selectedQrSrc, setSelectedQrSrc] = useState('');
+  const [loadingSessionQr, setLoadingSessionQr] = useState(false);
+  const [sessionQrError, setSessionQrError] = useState('');
   const [now, setNow] = useState(() => new Date());
 
   async function loadDetails(options = {}) {
     try {
       if (!options.silent) setLoading(true);
-      const [trainingResponse, attendanceResponse] = await Promise.all([
+      const [trainingResponse, attendanceResponse, sessionsResponse] = await Promise.all([
         trainingAPI.getTraining(id),
-        trainingAPI.getAttendance(id)
+        trainingAPI.getAttendance(id),
+        trainingAPI.getTrainingSessions(id).catch(() => ({ data: [] }))
       ]);
-      setTraining(trainingResponse.data);
+
+      const trainingData = trainingResponse.data;
+      const responseSessions = Array.isArray(trainingData.sessions) ? trainingData.sessions : [];
+      const fetchedSessions = Array.isArray(sessionsResponse.data) ? sessionsResponse.data : [];
+      setTraining({
+        ...trainingData,
+        sessions: responseSessions.length > 0 ? responseSessions : fetchedSessions
+      });
       setAttendance(attendanceResponse.data);
       setAccessDenied(false);
       setError('');
@@ -108,6 +142,10 @@ function TrainingDetails() {
     return () => window.clearInterval(intervalId);
   }, []);
 
+  useEffect(() => () => {
+    if (selectedQrSrc) window.URL.revokeObjectURL(selectedQrSrc);
+  }, [selectedQrSrc]);
+
   async function copyLink() {
     await navigator.clipboard.writeText(training.attendanceLink);
     setCopied(true);
@@ -134,7 +172,7 @@ function TrainingDetails() {
   }
 
   async function copySessionLink(session) {
-    await navigator.clipboard.writeText(session.attendanceLink);
+    await navigator.clipboard.writeText(getSessionAttendanceLink(session));
     setCopiedSessionId(session.id);
     window.setTimeout(() => setCopiedSessionId(''), 1800);
   }
@@ -155,20 +193,59 @@ function TrainingDetails() {
   }
 
   async function handleDownloadSessionQr(session) {
+    let qrObjectUrl = '';
+
     try {
       setSessionActionId(session.id);
       setQrDownloadError('');
-      const response = await trainingAPI.getSessionQrImage(id, session.id);
-      const qrObjectUrl = window.URL.createObjectURL(new Blob([response.data]));
+      const response = await trainingAPI.getTrainingSessionQr(id, session.id);
+      qrObjectUrl = window.URL.createObjectURL(new Blob([response.data]));
       await downloadQrAsJpg({
         qrSrc: qrObjectUrl,
         trainingName: `${training.trainingName} Day ${session.dayNumber}`
       });
-      window.URL.revokeObjectURL(qrObjectUrl);
     } catch (err) {
       setQrDownloadError(err.message || 'Failed to download QR code.');
     } finally {
+      if (qrObjectUrl) window.URL.revokeObjectURL(qrObjectUrl);
       setSessionActionId('');
+    }
+  }
+
+  async function viewSessionQr(session) {
+    try {
+      setSelectedQrSession(session);
+      setSelectedQrSrc('');
+      setSessionQrError('');
+      setLoadingSessionQr(true);
+      const response = await trainingAPI.getTrainingSessionQr(id, session.id);
+      const qrObjectUrl = window.URL.createObjectURL(new Blob([response.data]));
+      setSelectedQrSrc(qrObjectUrl);
+    } catch (err) {
+      setSessionQrError(getApiError(err, 'Failed to load session QR code.'));
+    } finally {
+      setLoadingSessionQr(false);
+    }
+  }
+
+  function closeSessionQr() {
+    setSelectedQrSession(null);
+    setSelectedQrSrc('');
+    setSessionQrError('');
+    setLoadingSessionQr(false);
+  }
+
+  async function downloadSelectedSessionQr() {
+    if (!selectedQrSession) return;
+
+    try {
+      setQrDownloadError('');
+      await downloadQrAsJpg({
+        qrSrc: selectedQrSrc,
+        trainingName: `${training.trainingName} Day ${selectedQrSession.dayNumber}`
+      });
+    } catch (err) {
+      setSessionQrError(err.message || 'Failed to download QR code.');
     }
   }
 
@@ -229,7 +306,7 @@ function TrainingDetails() {
       setSessionActionId(session.id);
       setError('');
       setAttendanceActionMessage('');
-      await trainingAPI.openSessionAttendance(id, session.id);
+      await trainingAPI.openTrainingSession(id, session.id);
       setAttendanceActionMessage(`Attendance opened for Day ${session.dayNumber}.`);
       await loadDetails({ silent: true });
     } catch (err) {
@@ -244,7 +321,7 @@ function TrainingDetails() {
       setSessionActionId(session.id);
       setError('');
       setAttendanceActionMessage('');
-      await trainingAPI.stopSessionAttendance(id, session.id);
+      await trainingAPI.stopTrainingSession(id, session.id);
       setAttendanceActionMessage(`Attendance closed for Day ${session.dayNumber}.`);
       await loadDetails({ silent: true });
     } catch (err) {
@@ -503,66 +580,55 @@ function TrainingDetails() {
             )}
 
             {isSeriesTraining && (
-              <section className="table-section" aria-label="Daily sessions">
+              <section className="table-section daily-sessions-section" aria-label="Daily attendance sessions">
                 <div className="section-heading">
                   <div>
                     <p className="eyebrow">Series</p>
-                    <h2>Daily Sessions</h2>
+                    <h2>Daily Attendance Sessions</h2>
                   </div>
                 </div>
                 {qrDownloadError && <div className="alert error">{qrDownloadError}</div>}
+                <p className="session-count-debug">Total Sessions: {sessions.length}</p>
                 <div className="table-shell">
-                  <table>
+                  <table className="daily-sessions-table">
                     <thead>
                       <tr>
                         <th>Day</th>
                         <th>Date</th>
                         <th>Time</th>
                         <th>Status</th>
-                        <th>Attendance</th>
+                        <th>Attendance Count</th>
+                        <th>Attendance Link</th>
+                        <th>QR</th>
                         <th>Actions</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {sessions.map((session) => {
+                      {sessions.length === 0 ? (
+                        <tr>
+                          <td colSpan="8" className="center muted">No daily sessions found for this training yet.</td>
+                        </tr>
+                      ) : sessions.map((session) => {
                         const state = getSessionState(session, now);
+                        const attendanceLink = getSessionAttendanceLink(session);
+                        const attendanceCount = session.attendanceCount ?? session._count?.attendances ?? session.attendances?.length ?? 0;
                         const canOpenSession = state.key !== 'active' &&
                           !session.manuallyStopped &&
-                          now.getTime() < new Date(session.endDateTime).getTime();
-                        const canStopSession = state.key === 'active' && !session.manuallyStopped;
+                          now.getTime() <= new Date(session.endDateTime).getTime();
+                        const canStopSession = !session.manuallyStopped;
 
                         return (
                           <tr key={session.id}>
                             <td><strong>Day {session.dayNumber}</strong></td>
-                            <td>{new Date(session.sessionDate).toLocaleDateString([], { dateStyle: 'medium' })}</td>
+                            <td>{formatSessionDate(session.sessionDate)}</td>
                             <td>
-                              <span className="block">{formatDateTime(session.startDateTime)}</span>
-                              <span className="muted block">to {formatDateTime(session.endDateTime)}</span>
+                              <span className="block">{formatSessionTime(session.startDateTime)} - {formatSessionTime(session.endDateTime)}</span>
                             </td>
-                            <td><span className={`status-badge ${state.badgeClass}`}>{state.label}</span></td>
-                            <td><strong>{session.attendanceCount || 0}</strong></td>
+                            <td><span className={`status-badge ${state.badgeClass}`}>{getSessionStatusLabel(session, state)}</span></td>
+                            <td><strong>{attendanceCount}</strong></td>
                             <td>
-                              <div className="inline-actions">
-                                <button
-                                  className="icon-button"
-                                  type="button"
-                                  title="Open attendance"
-                                  onClick={() => openSessionAttendance(session)}
-                                  disabled={!canOpenSession || sessionActionId === session.id}
-                                >
-                                  <Play size={18} aria-hidden="true" />
-                                  <span className="sr-only">Open attendance</span>
-                                </button>
-                                <button
-                                  className="icon-button danger-action"
-                                  type="button"
-                                  title="Close attendance"
-                                  onClick={() => stopSessionAttendance(session)}
-                                  disabled={!canStopSession || sessionActionId === session.id}
-                                >
-                                  <CircleStop size={18} aria-hidden="true" />
-                                  <span className="sr-only">Close attendance</span>
-                                </button>
+                              <div className="session-link-cell">
+                                <input value={attendanceLink} readOnly aria-label={`Day ${session.dayNumber} attendance link`} />
                                 <button
                                   className="icon-button"
                                   type="button"
@@ -572,24 +638,61 @@ function TrainingDetails() {
                                   {copiedSessionId === session.id ? <Check size={18} aria-hidden="true" /> : <Copy size={18} aria-hidden="true" />}
                                   <span className="sr-only">Copy attendance link</span>
                                 </button>
-                                <Link className="icon-button" to={`/attend/${session.token}`} target="_blank" title="Open attendance form">
-                                  <ExternalLink size={18} aria-hidden="true" />
-                                  <span className="sr-only">Open attendance form</span>
-                                </Link>
-                                <Link className="icon-button" to={`/training/${training.id}/qr-display?sessionId=${session.id}`} target="_blank" title="Open QR display">
-                                  <MonitorUp size={18} aria-hidden="true" />
-                                  <span className="sr-only">Open QR display</span>
-                                </Link>
+                              </div>
+                            </td>
+                            <td>
+                              <div className="session-button-group">
                                 <button
-                                  className="icon-button"
+                                  className="button button-secondary compact session-action-button"
                                   type="button"
-                                  title="Download QR as JPG"
+                                  onClick={() => viewSessionQr(session)}
+                                >
+                                  <MonitorUp size={17} aria-hidden="true" />
+                                  View QR
+                                </button>
+                                <button
+                                  className="button button-secondary compact session-action-button"
+                                  type="button"
                                   onClick={() => handleDownloadSessionQr(session)}
                                   disabled={sessionActionId === session.id}
                                 >
-                                  <Download size={18} aria-hidden="true" />
-                                  <span className="sr-only">Download QR</span>
+                                  <Download size={17} aria-hidden="true" />
+                                  Download QR as JPG
                                 </button>
+                              </div>
+                            </td>
+                            <td>
+                              <div className="session-button-group">
+                                <button
+                                  className="button button-primary compact session-action-button"
+                                  type="button"
+                                  onClick={() => openSessionAttendance(session)}
+                                  disabled={!canOpenSession || sessionActionId === session.id}
+                                >
+                                  <Play size={17} aria-hidden="true" />
+                                  Open Attendance
+                                </button>
+                                <button
+                                  className="button button-danger compact session-action-button"
+                                  type="button"
+                                  onClick={() => stopSessionAttendance(session)}
+                                  disabled={!canStopSession || sessionActionId === session.id}
+                                >
+                                  <CircleStop size={17} aria-hidden="true" />
+                                  Close Attendance
+                                </button>
+                                <button
+                                  className="button button-secondary compact session-action-button"
+                                  type="button"
+                                  onClick={() => copySessionLink(session)}
+                                >
+                                  {copiedSessionId === session.id ? <Check size={18} aria-hidden="true" /> : <Copy size={18} aria-hidden="true" />}
+                                  Copy Link
+                                </button>
+                                <Link className="button button-secondary compact session-action-button" to={`/attend/${session.token}`} target="_blank">
+                                  <ExternalLink size={17} aria-hidden="true" />
+                                  Open Attendance Link
+                                </Link>
                               </div>
                             </td>
                           </tr>
@@ -652,6 +755,52 @@ function TrainingDetails() {
                 <button className="button button-danger" type="button" onClick={stopAttendance} disabled={stopping}>
                   <CircleStop size={18} aria-hidden="true" />
                   {stopping ? 'Stopping...' : 'Stop Attendance'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {selectedQrSession && (
+          <div className="modal-backdrop" role="presentation">
+            <div className="modal session-qr-modal" role="dialog" aria-modal="true" aria-labelledby="session-qr-title">
+              <h2 id="session-qr-title">Day {selectedQrSession.dayNumber} QR Code</h2>
+              <p>{formatSessionDate(selectedQrSession.sessionDate)} - {formatSessionTime(selectedQrSession.startDateTime)} - {formatSessionTime(selectedQrSession.endDateTime)}</p>
+              <div className="session-qr-link">
+                <input value={getSessionAttendanceLink(selectedQrSession)} readOnly aria-label="Selected session attendance link" />
+                <button className="icon-button" type="button" onClick={() => copySessionLink(selectedQrSession)} title="Copy attendance link">
+                  {copiedSessionId === selectedQrSession.id ? <Check size={18} aria-hidden="true" /> : <Copy size={18} aria-hidden="true" />}
+                  <span className="sr-only">Copy attendance link</span>
+                </button>
+              </div>
+              <div className="session-qr-preview">
+                {loadingSessionQr ? (
+                  <div className="qr-loading">
+                    <div className="spinner" />
+                  </div>
+                ) : selectedQrSrc ? (
+                  <img src={selectedQrSrc} alt={`QR code for Day ${selectedQrSession.dayNumber}`} />
+                ) : (
+                  <p className="muted">QR code is not available.</p>
+                )}
+              </div>
+              {sessionQrError && <div className="alert error">{sessionQrError}</div>}
+              <div className="modal-actions">
+                <button className="button button-secondary" type="button" onClick={closeSessionQr}>
+                  Close
+                </button>
+                <Link className="button button-secondary" to={`/attend/${selectedQrSession.token}`} target="_blank">
+                  <ExternalLink size={18} aria-hidden="true" />
+                  Open Attendance Link
+                </Link>
+                <button
+                  className="button button-primary"
+                  type="button"
+                  onClick={downloadSelectedSessionQr}
+                  disabled={!selectedQrSrc}
+                >
+                  <Download size={18} aria-hidden="true" />
+                  Download QR as JPG
                 </button>
               </div>
             </div>
