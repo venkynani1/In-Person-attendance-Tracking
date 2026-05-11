@@ -6,6 +6,14 @@ export function formatDateTime(value) {
 }
 
 export function getSessionState(training, now = new Date()) {
+  if (Array.isArray(training?.sessions) && training.sessions.length > 0) {
+    const sessionStates = training.sessions.map((session) => getSessionState(session, now));
+    const activeState = sessionStates.find((state) => state.key === 'active');
+    if (activeState) return activeState;
+    const upcomingState = sessionStates.find((state) => state.key === 'not-started');
+    if (upcomingState) return upcomingState;
+  }
+
   if (training?.manuallyStopped) {
     return {
       key: 'closed',

@@ -9,25 +9,25 @@ const initialForm = {
   employeeName: ''
 };
 
-function getAttendanceSubmissionKey(trainingId) {
-  return `attendance_submitted_${trainingId}`;
+function getAttendanceSubmissionKey(trainingId, sessionId) {
+  return `attendance_submitted_${trainingId}_${sessionId || 'single'}`;
 }
 
-function hasAttendanceSubmissionLock(trainingId) {
+function hasAttendanceSubmissionLock(trainingId, sessionId) {
   if (!trainingId) return false;
 
   try {
-    return localStorage.getItem(getAttendanceSubmissionKey(trainingId)) === 'true';
+    return localStorage.getItem(getAttendanceSubmissionKey(trainingId, sessionId)) === 'true';
   } catch (error) {
     return false;
   }
 }
 
-function setAttendanceSubmissionLock(trainingId) {
+function setAttendanceSubmissionLock(trainingId, sessionId) {
   if (!trainingId) return;
 
   try {
-    localStorage.setItem(getAttendanceSubmissionKey(trainingId), 'true');
+    localStorage.setItem(getAttendanceSubmissionKey(trainingId, sessionId), 'true');
   } catch (error) {
     // Ignore storage failures so attendance submission itself is not blocked.
   }
@@ -49,7 +49,7 @@ function AttendPage() {
     try {
       const response = await attendAPI.getStatus(token);
       setStatus(response.data);
-      if (hasAttendanceSubmissionLock(response.data?.training?.id)) {
+      if (hasAttendanceSubmissionLock(response.data?.training?.id, response.data?.training?.sessionId)) {
         setSubmitted(true);
         setSuccess((current) => current || 'You have already submitted attendance for this session.');
       }
@@ -108,7 +108,7 @@ function AttendPage() {
         employeeId: form.employeeId,
         employeeName: form.employeeName
       });
-      setAttendanceSubmissionLock(status?.training?.id);
+      setAttendanceSubmissionLock(status?.training?.id, status?.training?.sessionId);
       setSuccess('Attendance submitted successfully');
       setSubmitted(true);
       await loadStatus();

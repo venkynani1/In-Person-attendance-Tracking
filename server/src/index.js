@@ -149,29 +149,50 @@ function parseNominationsWorkbook(buffer) {
   return nominations;
 }
 
-function buildExportRows(nominations = [], attendances = []) {
-  const attendanceByEmployeeId = new Map(
-    attendances.map((attendance) => [attendance.employeeId, attendance])
-  );
+function isSessionConducted(session, now = new Date()) {
+  return Boolean(session.attendanceOpenedAt || session.manuallyStopped || now > new Date(session.endDateTime));
+}
+
+function buildExportRows(nominations = [], attendances = [], sessions = []) {
+  const attendanceBySessionAndEmployeeId = new Map();
+  attendances.forEach((attendance) => {
+    if (!attendance.sessionId) return;
+    attendanceBySessionAndEmployeeId.set(`${attendance.sessionId}:${attendance.employeeId}`, attendance);
+  });
   const nominationByEmployeeId = new Map(
     nominations.map((nomination) => [nomination.employeeId, nomination])
   );
+  const employeesById = new Map(nominationByEmployeeId);
 
-  const nominatedRows = [...nominationByEmployeeId.values()].map((nomination) => ({
-    employeeId: nomination.employeeId,
-    employeeName: nomination.employeeName,
-    attendanceStatus: attendanceByEmployeeId.has(nomination.employeeId) ? 'Present' : 'Absent'
-  }));
+  attendances.forEach((attendance) => {
+    if (!employeesById.has(attendance.employeeId)) {
+      employeesById.set(attendance.employeeId, {
+        employeeId: attendance.employeeId,
+        employeeName: attendance.employeeName
+      });
+    }
+  });
 
-  const extraAttendanceRows = [...attendanceByEmployeeId.values()]
-    .filter((attendance) => !nominationByEmployeeId.has(attendance.employeeId))
-    .map((attendance) => ({
-      employeeId: attendance.employeeId,
-      employeeName: attendance.employeeName,
-      attendanceStatus: 'Present'
-    }));
+  return [...employeesById.values()].map((employee) => {
+    const sessionStatuses = {};
+    sessions.forEach((session) => {
+      const key = `session_${session.id}`;
+      const present = attendanceBySessionAndEmployeeId.has(`${session.id}:${employee.employeeId}`);
+      if (present) {
+        sessionStatuses[key] = 'Present';
+      } else if (isSessionConducted(session)) {
+        sessionStatuses[key] = 'Absent';
+      } else {
+        sessionStatuses[key] = '';
+      }
+    });
 
-  return [...nominatedRows, ...extraAttendanceRows];
+    return {
+      employeeId: employee.employeeId,
+      employeeName: employee.employeeName,
+      sessionStatuses
+    };
+  });
 }
 
 function formatDateForFileName(value) {
@@ -214,9 +235,15 @@ function sanitizeFileNamePart(value, fallback) {
 function buildExportFileName(training) {
   const trainingName = sanitizeFileNamePart(training.trainingName, 'Training');
   const location = sanitizeFileNamePart(training.location, 'Location');
-  const date = formatDateForFileName(training.startDateTime);
+  const sessions = Array.isArray(training.sessions) ? training.sessions : [];
+  const firstDate = formatDateForFileName(sessions[0]?.startDateTime || training.startDateTime);
 
-  return `${trainingName}_${location}_${date}.xlsx`;
+  if (sessions.length > 1) {
+    const lastDate = formatDateForFileName(sessions[sessions.length - 1]?.startDateTime || training.endDateTime);
+    return `${trainingName}_${location}_${firstDate}_to_${lastDate}.xlsx`;
+  }
+
+  return `${trainingName}_${location}_${firstDate}.xlsx`;
 }
 
 function isMissingNominationTableError(error) {
@@ -331,6 +358,21 @@ async function requireTrainingAccess(req, res, next) {
   } catch (error) {
     next(error);
   }
+}
+
+async function getTrainingSessionOrThrow(trainingId, sessionId, user, options = {}) {
+  await getTrainingOrThrow(trainingId, user);
+
+  const session = await prisma.trainingSession.findFirst({
+    where: {
+      id: sessionId,
+      trainingId
+    },
+    ...options
+  });
+
+  if (!session) throw createHttpError(404, 'Training session not found.');
+  return session;
 }
 
 async function ensureNominationTable() {
@@ -542,22 +584,54 @@ function buildAttendanceLink(token) {
   return `${publicBaseUrl.replace(/\/$/, '')}/attend/${token}`;
 }
 
-function getTrainingStatus(training) {
-  const now = new Date();
-  const startsAt = new Date(training.startDateTime);
-  const endsAt = new Date(training.endDateTime);
+function buildSessionAttendanceLink(session) {
+  return buildAttendanceLink(session.token);
+}
 
-  if (training.manuallyStopped) return 'closed';
+function getSessionStatus(session) {
+  const now = new Date();
+  const startsAt = new Date(session.startDateTime);
+  const endsAt = new Date(session.endDateTime);
+
+  if (session.manuallyStopped) return 'closed';
   if (now > endsAt) return 'expired';
-  if (training.attendanceOpenedAt) return 'open';
+  if (session.attendanceOpenedAt) return 'open';
   if (now < startsAt) return 'upcoming';
   return 'open';
 }
 
+function getTrainingStatus(training) {
+  if (Array.isArray(training.sessions) && training.sessions.length > 0) {
+    const statuses = training.sessions.map(getSessionStatus);
+    if (statuses.includes('open')) return 'open';
+    if (statuses.includes('upcoming')) return 'upcoming';
+    if (statuses.includes('closed')) return 'closed';
+    return 'expired';
+  }
+
+  return getSessionStatus(training);
+}
+
+function sessionResponse(session) {
+  return {
+    ...session,
+    attendanceLink: buildSessionAttendanceLink(session),
+    status: getSessionStatus(session),
+    attendanceCount: session._count?.attendances ?? session.attendanceCount ?? 0
+  };
+}
+
 function trainingResponse(training, nominatedCount = 0) {
+  const sessions = Array.isArray(training.sessions)
+    ? training.sessions.map(sessionResponse)
+    : [];
+  const primarySession = sessions[0];
+
   return {
     ...training,
-    attendanceLink: buildAttendanceLink(training.token),
+    sessions,
+    token: primarySession?.token || training.token,
+    attendanceLink: primarySession?.attendanceLink || (training.token ? buildAttendanceLink(training.token) : ''),
     status: getTrainingStatus(training),
     nominatedCount
   };
@@ -566,11 +640,68 @@ function trainingResponse(training, nominatedCount = 0) {
 async function generateUniqueToken() {
   for (let attempt = 0; attempt < 5; attempt += 1) {
     const token = crypto.randomBytes(32).toString('hex');
-    const existing = await prisma.training.findUnique({ where: { token } });
-    if (!existing) return token;
+    const [existingTraining, existingSession] = await Promise.all([
+      prisma.training.findUnique({ where: { token } }),
+      prisma.trainingSession.findUnique({ where: { token } })
+    ]);
+    if (!existingTraining && !existingSession) return token;
   }
 
   throw createHttpError(500, 'Could not generate a unique attendance token.');
+}
+
+function combineDateAndTime(dateValue, timeValue) {
+  const [hours, minutes] = String(timeValue || '').split(':').map(Number);
+  const date = new Date(`${dateValue}T00:00:00`);
+
+  if (
+    Number.isNaN(date.getTime()) ||
+    Number.isNaN(hours) ||
+    Number.isNaN(minutes)
+  ) {
+    return null;
+  }
+
+  date.setHours(hours, minutes, 0, 0);
+  return date;
+}
+
+async function buildSessionCreates({ trainingType, startsAt, endsAt, startDate, dailyStartTime, dailyEndTime, numberOfDays }) {
+  if (trainingType === 'SERIES') {
+    const days = Number(numberOfDays);
+    const sessionCreates = [];
+
+    for (let index = 0; index < days; index += 1) {
+      const sessionDate = new Date(`${startDate}T00:00:00`);
+      sessionDate.setDate(sessionDate.getDate() + index);
+
+      const datePart = [
+        sessionDate.getFullYear(),
+        String(sessionDate.getMonth() + 1).padStart(2, '0'),
+        String(sessionDate.getDate()).padStart(2, '0')
+      ].join('-');
+      const sessionStart = combineDateAndTime(datePart, dailyStartTime);
+      const sessionEnd = combineDateAndTime(datePart, dailyEndTime);
+
+      sessionCreates.push({
+        sessionDate,
+        startDateTime: sessionStart,
+        endDateTime: sessionEnd,
+        dayNumber: index + 1,
+        token: await generateUniqueToken()
+      });
+    }
+
+    return sessionCreates;
+  }
+
+  return [{
+    sessionDate: new Date(startsAt.getFullYear(), startsAt.getMonth(), startsAt.getDate()),
+    startDateTime: startsAt,
+    endDateTime: endsAt,
+    dayNumber: 1,
+    token: await generateUniqueToken()
+  }];
 }
 
 app.get('/api/health', (req, res) => {
@@ -801,24 +932,74 @@ app.post('/api/trainings', requireAuth, asyncHandler(async (req, res) => {
     trainerName,
     location,
     description,
+    trainingType = 'SINGLE',
+    numberOfDays,
+    startDate,
+    dailyStartTime,
+    dailyEndTime,
     startDateTime,
     endDateTime
   } = req.body;
+  const normalizedTrainingType = trainingType === 'SERIES' ? 'SERIES' : 'SINGLE';
 
-  if (!trainingName?.trim() || !trainerName?.trim() || !location?.trim() || !startDateTime || !endDateTime) {
+  if (!trainingName?.trim() || !trainerName?.trim() || !location?.trim()) {
+    throw createHttpError(400, 'Training name, trainer, and location are required.');
+  }
+
+  if (normalizedTrainingType === 'SINGLE' && (!startDateTime || !endDateTime)) {
     throw createHttpError(400, 'Training name, trainer, location, start time, and end time are required.');
   }
 
-  const startsAt = new Date(startDateTime);
-  const endsAt = new Date(endDateTime);
+  if (normalizedTrainingType === 'SERIES') {
+    if (!startDate || !dailyStartTime || !dailyEndTime || !numberOfDays) {
+      throw createHttpError(400, 'Start date, number of days, daily start time, and daily end time are required for series training.');
+    }
 
-  if (Number.isNaN(startsAt.getTime()) || Number.isNaN(endsAt.getTime())) {
+    if (!Number.isInteger(Number(numberOfDays)) || Number(numberOfDays) <= 1) {
+      throw createHttpError(400, 'Number of days must be greater than 1 for series training.');
+    }
+  }
+
+  let startsAt = new Date(startDateTime);
+  let endsAt = new Date(endDateTime);
+
+  if (normalizedTrainingType === 'SERIES') {
+    startsAt = combineDateAndTime(startDate, dailyStartTime);
+    const finalDate = new Date(`${startDate}T00:00:00`);
+    finalDate.setDate(finalDate.getDate() + Number(numberOfDays) - 1);
+    const finalDatePart = [
+      finalDate.getFullYear(),
+      String(finalDate.getMonth() + 1).padStart(2, '0'),
+      String(finalDate.getDate()).padStart(2, '0')
+    ].join('-');
+    endsAt = combineDateAndTime(finalDatePart, dailyEndTime);
+  }
+
+  if (!startsAt || !endsAt || Number.isNaN(startsAt.getTime()) || Number.isNaN(endsAt.getTime())) {
     throw createHttpError(400, 'Start and end date/time must be valid dates.');
   }
 
   if (startsAt >= endsAt) {
     throw createHttpError(400, 'End date/time must be after start date/time.');
   }
+
+  if (normalizedTrainingType === 'SERIES') {
+    const firstDailyStart = combineDateAndTime(startDate, dailyStartTime);
+    const firstDailyEnd = combineDateAndTime(startDate, dailyEndTime);
+    if (!firstDailyStart || !firstDailyEnd || firstDailyStart >= firstDailyEnd) {
+      throw createHttpError(400, 'Daily end time must be after daily start time.');
+    }
+  }
+
+  const sessionCreates = await buildSessionCreates({
+    trainingType: normalizedTrainingType,
+    startsAt,
+    endsAt,
+    startDate,
+    dailyStartTime,
+    dailyEndTime,
+    numberOfDays
+  });
 
   const training = await prisma.training.create({
     data: {
@@ -828,10 +1009,19 @@ app.post('/api/trainings', requireAuth, asyncHandler(async (req, res) => {
       description: sanitizeOptional(description),
       startDateTime: startsAt,
       endDateTime: endsAt,
+      trainingType: normalizedTrainingType,
+      numberOfDays: normalizedTrainingType === 'SERIES' ? Number(numberOfDays) : 1,
       createdById: req.user.id,
-      token: await generateUniqueToken()
+      token: sessionCreates[0].token,
+      sessions: {
+        create: sessionCreates
+      }
     },
     include: {
+      sessions: {
+        orderBy: { dayNumber: 'asc' },
+        include: { _count: { select: { attendances: true } } }
+      },
       _count: { select: { attendances: true } }
     }
   });
@@ -847,6 +1037,10 @@ app.get('/api/trainings', requireAuth, asyncHandler(async (req, res) => {
     where: trainingVisibilityWhere(req.user),
     orderBy: { createdAt: 'desc' },
     include: {
+      sessions: {
+        orderBy: { dayNumber: 'asc' },
+        include: { _count: { select: { attendances: true } } }
+      },
       _count: { select: { attendances: true } }
     }
   });
@@ -865,9 +1059,17 @@ app.get('/api/trainings/:id', requireAuth, asyncHandler(async (req, res) => {
 }));
 
 app.get('/api/trainings/:id/qr', requireAuth, asyncHandler(async (req, res) => {
-  const training = await getTrainingOrThrow(req.params.id, req.user);
+  const training = await getTrainingOrThrow(req.params.id, req.user, {
+    include: {
+      sessions: {
+        orderBy: { dayNumber: 'asc' },
+        take: 1
+      }
+    }
+  });
+  const token = training.sessions?.[0]?.token || training.token;
 
-  const qrBuffer = await QRCode.toBuffer(buildAttendanceLink(training.token), {
+  const qrBuffer = await QRCode.toBuffer(buildAttendanceLink(token), {
     type: 'png',
     width: 960,
     margin: 2,
@@ -881,9 +1083,12 @@ app.get('/api/trainings/:id/qr', requireAuth, asyncHandler(async (req, res) => {
 
 app.get('/api/trainings/:id/attendance', requireAuth, asyncHandler(async (req, res) => {
   await getTrainingOrThrow(req.params.id, req.user);
+  const where = req.query.sessionId
+    ? { trainingId: req.params.id, sessionId: String(req.query.sessionId) }
+    : { trainingId: req.params.id };
 
   const attendances = await prisma.attendance.findMany({
-    where: { trainingId: req.params.id },
+    where,
     orderBy: { employeeName: 'asc' },
     select: {
       employeeId: true,
@@ -892,6 +1097,35 @@ app.get('/api/trainings/:id/attendance', requireAuth, asyncHandler(async (req, r
   });
 
   res.json(attendances);
+}));
+
+app.get('/api/trainings/:id/sessions', requireAuth, asyncHandler(async (req, res) => {
+  await getTrainingOrThrow(req.params.id, req.user);
+
+  const sessions = await prisma.trainingSession.findMany({
+    where: { trainingId: req.params.id },
+    orderBy: { dayNumber: 'asc' },
+    include: {
+      _count: { select: { attendances: true } }
+    }
+  });
+
+  res.json(sessions.map(sessionResponse));
+}));
+
+app.get('/api/trainings/:id/sessions/:sessionId/qr', requireAuth, asyncHandler(async (req, res) => {
+  const session = await getTrainingSessionOrThrow(req.params.id, req.params.sessionId, req.user);
+
+  const qrBuffer = await QRCode.toBuffer(buildSessionAttendanceLink(session), {
+    type: 'png',
+    width: 960,
+    margin: 2,
+    errorCorrectionLevel: 'M'
+  });
+
+  res.setHeader('Content-Type', 'image/png');
+  res.setHeader('Cache-Control', 'no-store');
+  res.send(qrBuffer);
 }));
 
 app.get('/api/trainings/:id/nominations', requireAuth, asyncHandler(async (req, res) => {
@@ -964,12 +1198,25 @@ app.get('/api/trainings/:id/export', requireAuth, asyncHandler(async (req, res) 
       trainingName: true,
       location: true,
       startDateTime: true,
+      endDateTime: true,
+      sessions: {
+        orderBy: { dayNumber: 'asc' },
+        select: {
+          id: true,
+          sessionDate: true,
+          startDateTime: true,
+          endDateTime: true,
+          attendanceOpenedAt: true,
+          manuallyStopped: true
+        }
+      },
       attendances: {
         orderBy: [
           { employeeName: 'asc' },
           { employeeId: 'asc' }
         ],
         select: {
+          sessionId: true,
           employeeId: true,
           employeeName: true
         }
@@ -989,8 +1236,9 @@ app.get('/api/trainings/:id/export', requireAuth, asyncHandler(async (req, res) 
 
   if (!training) throw createHttpError(404, 'Training not found.');
 
-  const workbook = createAttendanceWorkbook(buildExportRows(training.nominations, training.attendances), {
-    exportDate: training.startDateTime
+  const workbook = createAttendanceWorkbook(buildExportRows(training.nominations, training.attendances, training.sessions), {
+    exportDate: training.startDateTime,
+    sessions: training.sessions
   });
   const fileName = buildExportFileName(training);
   const buffer = await workbook.xlsx.writeBuffer();
@@ -1004,12 +1252,19 @@ app.get('/api/trainings/:id/export', requireAuth, asyncHandler(async (req, res) 
 async function openTrainingAttendance(req, res) {
   const training = await getTrainingOrThrow(req.params.id, req.user, {
     include: {
+      sessions: {
+        orderBy: { dayNumber: 'asc' },
+        take: 1,
+        include: { _count: { select: { attendances: true } } }
+      },
       _count: { select: { attendances: true } }
     }
   });
-  const status = getTrainingStatus(training);
+  const session = training.sessions?.[0];
+  if (!session) throw createHttpError(404, 'Training session not found.');
+  const status = getSessionStatus(session);
 
-  if (training.manuallyStopped) {
+  if (session.manuallyStopped) {
     throw createHttpError(400, 'Attendance has already been stopped for this training.');
   }
 
@@ -1022,12 +1277,17 @@ async function openTrainingAttendance(req, res) {
     return;
   }
 
-  const openedTraining = await prisma.training.update({
-    where: { id: req.params.id },
-    data: {
-      attendanceOpenedAt: new Date()
-    },
+  await prisma.trainingSession.update({
+    where: { id: session.id },
+    data: { attendanceOpenedAt: new Date() }
+  });
+
+  const openedTraining = await getTrainingOrThrow(req.params.id, req.user, {
     include: {
+      sessions: {
+        orderBy: { dayNumber: 'asc' },
+        include: { _count: { select: { attendances: true } } }
+      },
       _count: { select: { attendances: true } }
     }
   });
@@ -1035,32 +1295,101 @@ async function openTrainingAttendance(req, res) {
   res.json((await trainingResponses([openedTraining]))[0]);
 }
 
-app.patch('/api/trainings/:id/open', requireAuth, asyncHandler(openTrainingAttendance));
-app.patch('/trainings/:id/open', requireAuth, asyncHandler(openTrainingAttendance));
-
-app.patch('/api/trainings/:id/stop', requireAuth, asyncHandler(async (req, res) => {
-  const training = await getTrainingOrThrow(req.params.id, req.user, {
-    include: {
-      _count: { select: { attendances: true } }
-    }
+async function openTrainingSessionAttendance(req, res) {
+  const session = await getTrainingSessionOrThrow(req.params.id, req.params.sessionId, req.user, {
+    include: { _count: { select: { attendances: true } } }
   });
+  const status = getSessionStatus(session);
 
-  if (training.manuallyStopped) {
-    res.json((await trainingResponses([training]))[0]);
+  if (session.manuallyStopped) {
+    throw createHttpError(400, 'Attendance has already been stopped for this session.');
+  }
+
+  if (status === 'expired') {
+    throw createHttpError(400, 'Attendance cannot be opened after the session end time.');
+  }
+
+  if (status === 'open') {
+    res.json(sessionResponse(session));
     return;
   }
 
-  if (getTrainingStatus(training) !== 'open') {
-    throw createHttpError(400, 'Only active trainings can be stopped.');
+  const openedSession = await prisma.trainingSession.update({
+    where: { id: session.id },
+    data: { attendanceOpenedAt: new Date() },
+    include: { _count: { select: { attendances: true } } }
+  });
+
+  res.json(sessionResponse(openedSession));
+}
+
+async function stopTrainingSessionAttendance(req, res) {
+  const session = await getTrainingSessionOrThrow(req.params.id, req.params.sessionId, req.user, {
+    include: { _count: { select: { attendances: true } } }
+  });
+
+  if (session.manuallyStopped) {
+    res.json(sessionResponse(session));
+    return;
   }
 
-  const stoppedTraining = await prisma.training.update({
-    where: { id: req.params.id },
+  if (getSessionStatus(session) !== 'open') {
+    throw createHttpError(400, 'Only active sessions can be stopped.');
+  }
+
+  const stoppedSession = await prisma.trainingSession.update({
+    where: { id: session.id },
     data: {
       manuallyStopped: true,
       stoppedAt: new Date()
     },
+    include: { _count: { select: { attendances: true } } }
+  });
+
+  res.json(sessionResponse(stoppedSession));
+}
+
+app.patch('/api/trainings/:id/open', requireAuth, asyncHandler(openTrainingAttendance));
+app.patch('/trainings/:id/open', requireAuth, asyncHandler(openTrainingAttendance));
+app.patch('/api/trainings/:id/sessions/:sessionId/open', requireAuth, asyncHandler(openTrainingSessionAttendance));
+app.patch('/api/trainings/:id/sessions/:sessionId/stop', requireAuth, asyncHandler(stopTrainingSessionAttendance));
+
+app.patch('/api/trainings/:id/stop', requireAuth, asyncHandler(async (req, res) => {
+  const training = await getTrainingOrThrow(req.params.id, req.user, {
     include: {
+      sessions: {
+        orderBy: { dayNumber: 'asc' },
+        take: 1
+      },
+      _count: { select: { attendances: true } }
+    }
+  });
+  const session = training.sessions?.[0];
+  if (!session) throw createHttpError(404, 'Training session not found.');
+
+  if (session.manuallyStopped) {
+    res.json((await trainingResponses([training]))[0]);
+    return;
+  }
+
+  if (getSessionStatus(session) !== 'open') {
+    throw createHttpError(400, 'Only active trainings can be stopped.');
+  }
+
+  await prisma.trainingSession.update({
+    where: { id: session.id },
+    data: {
+      manuallyStopped: true,
+      stoppedAt: new Date()
+    }
+  });
+
+  const stoppedTraining = await getTrainingOrThrow(req.params.id, req.user, {
+    include: {
+      sessions: {
+        orderBy: { dayNumber: 'asc' },
+        include: { _count: { select: { attendances: true } } }
+      },
       _count: { select: { attendances: true } }
     }
   });
@@ -1077,24 +1406,34 @@ app.delete('/api/trainings/:id', requireAuth, asyncHandler(async (req, res) => {
 app.get('/api/attend/:token/status', asyncHandler(async (req, res) => {
   await ensureAttendanceOpenedAtColumn();
 
-  const training = await prisma.training.findUnique({
+  const session = await prisma.trainingSession.findUnique({
     where: { token: req.params.token },
-    select: {
-      id: true,
-      trainingName: true,
-      trainerName: true,
-      location: true,
-      description: true,
-      startDateTime: true,
-      endDateTime: true,
-      token: true,
-      manuallyStopped: true,
-      attendanceOpenedAt: true,
-      stoppedAt: true
+    include: {
+      training: {
+        select: {
+          id: true,
+          trainingName: true,
+          trainerName: true,
+          location: true,
+          description: true,
+          trainingType: true
+        }
+      }
     }
   });
 
-  if (!training) throw createHttpError(404, 'Attendance link not found.');
+  if (!session) throw createHttpError(404, 'Attendance link not found.');
+  const training = {
+    ...session.training,
+    startDateTime: session.startDateTime,
+    endDateTime: session.endDateTime,
+    token: session.token,
+    manuallyStopped: session.manuallyStopped,
+    attendanceOpenedAt: session.attendanceOpenedAt,
+    stoppedAt: session.stoppedAt,
+    sessionId: session.id,
+    dayNumber: session.dayNumber
+  };
 
   res.json({
     training: trainingResponse(training),
@@ -1119,19 +1458,17 @@ app.post('/api/attend/:token', asyncHandler(async (req, res) => {
     throw createHttpError(400, 'Invalid Employee ID format');
   }
 
-  const training = await prisma.training.findUnique({
+  const session = await prisma.trainingSession.findUnique({
     where: { token: req.params.token },
-    select: {
-      id: true,
-      startDateTime: true,
-      endDateTime: true,
-      manuallyStopped: true,
-      attendanceOpenedAt: true
+    include: {
+      training: {
+        select: { id: true }
+      }
     }
   });
-  if (!training) throw createHttpError(404, 'Attendance link not found.');
+  if (!session) throw createHttpError(404, 'Attendance link not found.');
 
-  const status = getTrainingStatus(training);
+  const status = getSessionStatus(session);
   if (status === 'upcoming') throw createHttpError(403, 'Attendance has not opened yet.');
   if (status === 'closed') throw createHttpError(403, 'Attendance closed by admin.');
   if (status === 'expired') throw createHttpError(403, 'Attendance has closed for this training.');
@@ -1139,7 +1476,7 @@ app.post('/api/attend/:token', asyncHandler(async (req, res) => {
   if (ipAddress) {
     const existingAttendanceFromIp = await prisma.attendance.findFirst({
       where: {
-        trainingId: training.id,
+        sessionId: session.id,
         ipAddress
       },
       select: {
@@ -1154,7 +1491,8 @@ app.post('/api/attend/:token', asyncHandler(async (req, res) => {
 
   const attendance = await prisma.attendance.create({
     data: {
-      trainingId: training.id,
+      trainingId: session.trainingId,
+      sessionId: session.id,
       employeeId: normalizedEmployeeId,
       employeeName: normalizedEmployeeName,
       ipAddress

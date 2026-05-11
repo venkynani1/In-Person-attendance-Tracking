@@ -56,18 +56,28 @@ function sortExportRows(rows) {
   });
 }
 
-export function createAttendanceWorkbook(attendances = [], options = {}) {
+export function createAttendanceWorkbook(rows = [], options = {}) {
   const workbook = new ExcelJS.Workbook();
   workbook.creator = 'Attendance App';
   workbook.created = new Date();
 
-  const exportDate = formatExportDate(options.exportDate);
+  const sessionColumns = Array.isArray(options.sessions) && options.sessions.length > 0
+    ? options.sessions.map((session) => ({
+      header: formatExportDate(session.startDateTime || session.sessionDate),
+      key: `session_${session.id}`,
+      width: 18
+    }))
+    : [{
+      header: formatExportDate(options.exportDate),
+      key: 'attendanceStatus',
+      width: 18
+    }];
 
   const sheet = workbook.addWorksheet('Attendance');
   sheet.columns = [
     { header: 'Employee ID', key: 'employeeId', width: 18 },
     { header: 'Employee Name', key: 'employeeName', width: 30 },
-    { header: exportDate, key: 'attendanceStatus', width: 18 }
+    ...sessionColumns
   ];
 
   sheet.getRow(1).font = { bold: true };
@@ -77,11 +87,12 @@ export function createAttendanceWorkbook(attendances = [], options = {}) {
     fgColor: { argb: 'FFEAF2F8' }
   };
 
-  sortExportRows(attendances).forEach((attendance) => {
+  sortExportRows(rows).forEach((attendance) => {
     sheet.addRow({
       employeeId: safeCellValue(attendance?.employeeId),
       employeeName: safeCellValue(attendance?.employeeName),
-      attendanceStatus: safeCellValue(attendance?.attendanceStatus)
+      attendanceStatus: safeCellValue(attendance?.attendanceStatus),
+      ...attendance?.sessionStatuses
     });
   });
 

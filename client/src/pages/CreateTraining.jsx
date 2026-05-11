@@ -9,8 +9,13 @@ const initialForm = {
   trainerName: '',
   location: '',
   description: '',
+  trainingType: 'SINGLE',
   startDateTime: '',
-  endDateTime: ''
+  endDateTime: '',
+  startDate: '',
+  numberOfDays: '2',
+  dailyStartTime: '',
+  dailyEndTime: ''
 };
 
 function toIsoDateTime(value) {
@@ -34,11 +39,28 @@ function CreateTraining() {
 
     try {
       setSubmitting(true);
-      const response = await trainingAPI.createTraining({
-        ...form,
-        startDateTime: toIsoDateTime(form.startDateTime),
-        endDateTime: toIsoDateTime(form.endDateTime)
-      });
+      const payload = form.trainingType === 'SERIES'
+        ? {
+          trainingName: form.trainingName,
+          trainerName: form.trainerName,
+          location: form.location,
+          description: form.description,
+          trainingType: 'SERIES',
+          startDate: form.startDate,
+          numberOfDays: Number(form.numberOfDays),
+          dailyStartTime: form.dailyStartTime,
+          dailyEndTime: form.dailyEndTime
+        }
+        : {
+          trainingName: form.trainingName,
+          trainerName: form.trainerName,
+          location: form.location,
+          description: form.description,
+          trainingType: 'SINGLE',
+          startDateTime: toIsoDateTime(form.startDateTime),
+          endDateTime: toIsoDateTime(form.endDateTime)
+        };
+      const response = await trainingAPI.createTraining(payload);
       navigate(`/training/${response.data.id}`);
     } catch (err) {
       setError(getApiError(err, 'Could not create training.'));
@@ -77,6 +99,13 @@ function CreateTraining() {
               <span>Description optional</span>
               <textarea name="description" value={form.description} onChange={updateField} rows="3" />
             </label>
+            <label>
+              <span>Training type</span>
+              <select name="trainingType" value={form.trainingType} onChange={updateField}>
+                <option value="SINGLE">Single Day Training</option>
+                <option value="SERIES">Series Training</option>
+              </select>
+            </label>
           </section>
 
           <section className="form-section">
@@ -101,28 +130,74 @@ function CreateTraining() {
               <span className="section-icon"><MapPin size={18} aria-hidden="true" /></span>
               <h2>Attendance Window</h2>
             </div>
-            <div className="form-grid two">
-              <label>
-                <span>Start date and time</span>
-                <input
-                  name="startDateTime"
-                  type="datetime-local"
-                  value={form.startDateTime}
-                  onChange={updateField}
-                  required
-                />
-              </label>
-              <label>
-                <span>End date and time</span>
-                <input
-                  name="endDateTime"
-                  type="datetime-local"
-                  value={form.endDateTime}
-                  onChange={updateField}
-                  required
-                />
-              </label>
-            </div>
+            {form.trainingType === 'SINGLE' ? (
+              <div className="form-grid two">
+                <label>
+                  <span>Start date and time</span>
+                  <input
+                    name="startDateTime"
+                    type="datetime-local"
+                    value={form.startDateTime}
+                    onChange={updateField}
+                    required
+                  />
+                </label>
+                <label>
+                  <span>End date and time</span>
+                  <input
+                    name="endDateTime"
+                    type="datetime-local"
+                    value={form.endDateTime}
+                    onChange={updateField}
+                    required
+                  />
+                </label>
+              </div>
+            ) : (
+              <div className="form-grid two">
+                <label>
+                  <span>Start date</span>
+                  <input
+                    name="startDate"
+                    type="date"
+                    value={form.startDate}
+                    onChange={updateField}
+                    required
+                  />
+                </label>
+                <label>
+                  <span>Number of days</span>
+                  <input
+                    name="numberOfDays"
+                    type="number"
+                    min="2"
+                    value={form.numberOfDays}
+                    onChange={updateField}
+                    required
+                  />
+                </label>
+                <label>
+                  <span>Daily start time</span>
+                  <input
+                    name="dailyStartTime"
+                    type="time"
+                    value={form.dailyStartTime}
+                    onChange={updateField}
+                    required
+                  />
+                </label>
+                <label>
+                  <span>Daily end time</span>
+                  <input
+                    name="dailyEndTime"
+                    type="time"
+                    value={form.dailyEndTime}
+                    onChange={updateField}
+                    required
+                  />
+                </label>
+              </div>
+            )}
           </section>
 
           <div className="form-actions">

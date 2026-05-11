@@ -38,7 +38,13 @@ function sanitizeFileNamePart(value, fallback) {
 export function buildAttendanceReportFileName(training) {
   const trainingName = sanitizeFileNamePart(training?.trainingName, 'Training');
   const location = sanitizeFileNamePart(training?.location, 'Location');
-  const date = formatDateForFileName(training?.startDateTime);
+  const sessions = Array.isArray(training?.sessions) ? training.sessions : [];
+  const date = formatDateForFileName(sessions[0]?.startDateTime || training?.startDateTime);
+
+  if (sessions.length > 1) {
+    const endDate = formatDateForFileName(sessions[sessions.length - 1]?.startDateTime || training?.endDateTime);
+    return `${trainingName}_${location}_${date}_to_${endDate}.xlsx`;
+  }
 
   return `${trainingName}_${location}_${date}.xlsx`;
 }

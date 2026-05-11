@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { ArrowLeft, Clock, Download, QrCode, UsersRound } from 'lucide-react';
 import { getApiError, trainingAPI } from '../services/api.js';
 import { downloadQrAsJpg } from '../utils/qrDownload.js';
@@ -7,7 +7,10 @@ import { formatDateTime, getCountdownMessage, getSessionState } from '../utils/s
 
 function QrDisplay() {
   const { id } = useParams();
+  const [searchParams] = useSearchParams();
+  const sessionId = searchParams.get('sessionId');
   const [training, setTraining] = useState(null);
+  const [displaySession, setDisplaySession] = useState(null);
   const [attendance, setAttendance] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -19,11 +22,13 @@ function QrDisplay() {
   async function loadDisplay(options = {}) {
     try {
       if (!options.silent) setLoading(true);
-      const [trainingResponse, attendanceResponse] = await Promise.all([
+      const [trainingResponse, attendanceResponse, sessionsResponse] = await Promise.all([
         trainingAPI.getTraining(id),
-        trainingAPI.getAttendance(id)
+        sessionId ? trainingAPI.getSessionAttendance(id, sessionId) : trainingAPI.getAttendance(id),
+        sessionId ? trainingAPI.getSessions(id) : Promise.resolve({ data: [] })
       ]);
       setTraining(trainingResponse.data);
+      setDisplaySession(sessionId ? sessionsResponse.data.find((session) => session.id === sessionId) || null : null);
       setAttendance(attendanceResponse.data);
       setError('');
     } catch (err) {
@@ -37,7 +42,7 @@ function QrDisplay() {
     loadDisplay();
     const refreshId = window.setInterval(() => loadDisplay({ silent: true }), 15000);
     return () => window.clearInterval(refreshId);
-  }, [id]);
+  }, [id, sessionId]);
 
   useEffect(() => {
     let active = true;
@@ -45,7 +50,9 @@ function QrDisplay() {
 
     async function loadQrImage() {
       try {
-        const response = await trainingAPI.getQrImage(id);
+        const response = sessionId
+          ? await trainingAPI.getSessionQrImage(id, sessionId)
+          : await trainingAPI.getQrImage(id);
         objectUrl = window.URL.createObjectURL(new Blob([response.data]));
         if (active) {
           setQrSrc((current) => {
@@ -66,14 +73,24 @@ function QrDisplay() {
       active = false;
       if (objectUrl) window.URL.revokeObjectURL(objectUrl);
     };
-  }, [id]);
+  }, [id, sessionId]);
 
   useEffect(() => {
     const intervalId = window.setInterval(() => setNow(new Date()), 1000);
     return () => window.clearInterval(intervalId);
   }, []);
 
-  const sessionState = training ? getSessionState(training, now) : null;
+  const displayTraining = training && displaySession
+    ? {
+      ...training,
+      trainingName: `${training.trainingName} - Day ${displaySession.dayNumber}`,
+      startDateTime: displaySession.startDateTime,
+      endDateTime: displaySession.endDateTime,
+      manuallyStopped: displaySession.manuallyStopped,
+      attendanceOpenedAt: displaySession.attendanceOpenedAt
+    }
+    : training;
+  const sessionState = displayTraining ? getSessionState(displayTraining, now) : null;
 
   async function handleDownloadQr() {
     try {
@@ -81,7 +98,7 @@ function QrDisplay() {
       setQrDownloadError('');
       await downloadQrAsJpg({
         qrSrc,
-        trainingName: training.trainingName
+        trainingName: displayTraining.trainingName
       });
     } catch (err) {
       setQrDownloadError(err.message || 'Failed to download QR code.');
@@ -106,19 +123,19 @@ function QrDisplay() {
         <section className="qr-display-card">
           <div className="alert error">{error}</div>
         </section>
-      ) : training ? (
+      ) : displayTraining ? (
         <section className="qr-display-card">
           <div className="qr-display-copy">
             <p className="eyebrow">Live Attendance</p>
-            <h1>{training.trainingName}</h1>
+            <h1>{displayTraining.trainingName}</h1>
             <p>Scan to mark attendance</p>
             <div className="qr-display-meta">
               <span className={`status-badge ${sessionState.badgeClass}`}>{sessionState.label}</span>
-              <span><Clock size={18} aria-hidden="true" />{getCountdownMessage(training, now)}</span>
+              <span><Clock size={18} aria-hidden="true" />{getCountdownMessage(displayTraining, now)}</span>
               <span><UsersRound size={18} aria-hidden="true" />{attendance.length} present</span>
             </div>
             <div className="qr-display-window">
-              {formatDateTime(training.startDateTime)} to {formatDateTime(training.endDateTime)}
+              {formatDateTime(displayTraining.startDateTime)} to {formatDateTime(displayTraining.endDateTime)}
             </div>
             <div className="qr-display-instruction">
               Enter Employee ID and Name to confirm attendance.
@@ -128,7 +145,7 @@ function QrDisplay() {
           <div className="qr-display-code-wrap">
             <div className="qr-display-code">
               {qrSrc ? (
-                <img src={qrSrc} alt={`QR code for ${training.trainingName}`} />
+                <img src={qrSrc} alt={`QR code for ${displayTraining.trainingName}`} />
               ) : (
                 <div className="qr-loading">
                   <div className="spinner" />

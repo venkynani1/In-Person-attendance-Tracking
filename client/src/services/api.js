@@ -147,6 +147,18 @@ export const trainingAPI = {
       api.get(`/api/trainings/${id}/attendance`)
     );
   },
+  getSessionAttendance(id, sessionId) {
+    return requestWithRetry(() =>
+      api.get(`/api/trainings/${id}/attendance`, {
+        params: { sessionId }
+      })
+    );
+  },
+  getSessions(id) {
+    return requestWithRetry(() =>
+      api.get(`/api/trainings/${id}/sessions`)
+    );
+  },
   getNominations(id) {
     return requestWithRetry(() =>
       api.get(`/api/trainings/${id}/nominations`)
@@ -166,6 +178,13 @@ export const trainingAPI = {
       })
     );
   },
+  getSessionQrImage(id, sessionId) {
+    return requestWithRetry(() =>
+      api.get(`/api/trainings/${id}/sessions/${sessionId}/qr`, {
+        responseType: 'blob'
+      })
+    );
+  },
   exportAttendance(id) {
     return requestWithRetry(() =>
       api.get(`/api/trainings/${id}/export`, {
@@ -176,6 +195,16 @@ export const trainingAPI = {
   openAttendance(id) {
     return requestWithRetry(() =>
       api.patch(`/api/trainings/${id}/open`)
+    );
+  },
+  openSessionAttendance(id, sessionId) {
+    return requestWithRetry(() =>
+      api.patch(`/api/trainings/${id}/sessions/${sessionId}/open`)
+    );
+  },
+  stopSessionAttendance(id, sessionId) {
+    return requestWithRetry(() =>
+      api.patch(`/api/trainings/${id}/sessions/${sessionId}/stop`)
     );
   },
   stopAttendance(id) {
