@@ -72,7 +72,7 @@ function publishBackendStatus(status) {
 
 function isRetryable(error) {
   if (!error.response) return true;
-  return [502, 503, 504].includes(error.response.status);
+  return [429, 502, 503, 504].includes(error.response.status);
 }
 
 function errorMessage(error, fallback = 'Request failed. Please try again.') {
@@ -104,13 +104,25 @@ async function requestWithRetry(operation, options = {}) {
         throw error;
       }
 
+      // Extract Retry-After header for 429 errors, otherwise use exponential backoff
+      let delayMs = retryDelayMs;
+      if (error.response?.status === 429) {
+        const retryAfter = error.response.headers['retry-after'];
+        if (retryAfter) {
+          delayMs = parseInt(retryAfter, 10) * 1000;
+        } else {
+          // Exponential backoff for 429: 3s, 6s, 12s...
+          delayMs = retryDelayMs * Math.pow(2, attempt);
+        }
+      }
+
       publishBackendStatus({
         state: 'retrying',
-        message: 'Retrying connection...'
+        message: 'Rate limited. Retrying...'
       });
 
       await new Promise((resolve) =>
-        setTimeout(resolve, retryDelayMs)
+        setTimeout(resolve, delayMs)
       );
     }
   }
